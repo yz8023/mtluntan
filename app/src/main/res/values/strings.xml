@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MT论坛</string>
+    <string name="app_name_en">MT Luntan</string>
+    <string name="site_bbs">bbs.binmt.cc</string>
+    <string name="base_url">https://bbs.binmt.cc</string>
+    <string name="cdn_url">https://cdn-bbs.mt2.cn</string>
+    <string name="login_page">/member.php?mod=logging&amp;action=login</string>
+</resources>
