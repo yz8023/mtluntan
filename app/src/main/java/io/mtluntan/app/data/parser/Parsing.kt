@@ -149,6 +149,14 @@ object Parsing {
         return ""
     }
 
+    /** Formhash-like value with a JS-variable fallback (mobile template often sets `var formhash = '...'`). */
+    fun valueWithJsFallback(html: String, name: String): String {
+        val fromDom = value(doc(html), name)
+        if (fromDom.isNotEmpty()) return fromDom
+        Regex("$name\\s*=\\s*['\"]([^'\"]+)['\"]").find(html)?.groupValues?.getOrNull(1)?.let { return it }
+        return ""
+    }
+
     fun firstWholePageRoot(doc: Document): Elements = doc.select("#postlist table[id^=\"pid\"]")
 }
 

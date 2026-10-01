@@ -83,22 +83,32 @@ class Net(context: Context) {
     }
 
     /** Performs a GET and returns the (decoded) response body. */
-    suspend fun get(url: String, ajax: Boolean = false): String = withContext(Dispatchers.IO) {
-        val builder = Request.Builder().url(url)
-        defaultHeaders().forEach { (k, v) -> builder.header(k, v) }
-        if (ajax) builder.header("X-Requested-With", "XMLHttpRequest")
-        client.newCall(builder.build()).execute().use { processBody(it) }
-    }
+    suspend fun get(url: String, ajax: Boolean = false, foreground: Boolean = false): String =
+        withContext(Dispatchers.IO) {
+            RequestThrottle.acquire(foreground)
+            val builder = Request.Builder().url(url)
+            defaultHeaders().forEach { (k, v) -> builder.header(k, v) }
+            if (ajax) builder.header("X-Requested-With", "XMLHttpRequest")
+            client.newCall(builder.build()).execute().use { processBody(it) }
+        }
 
-    suspend fun getResponse(url: String): Response = withContext(Dispatchers.IO) {
-        val builder = Request.Builder().url(url)
-        defaultHeaders().forEach { (k, v) -> builder.header(k, v) }
-        client.newCall(builder.build()).execute()
-    }
+    suspend fun getResponse(url: String, foreground: Boolean = false): Response =
+        withContext(Dispatchers.IO) {
+            RequestThrottle.acquire(foreground)
+            val builder = Request.Builder().url(url)
+            defaultHeaders().forEach { (k, v) -> builder.header(k, v) }
+            client.newCall(builder.build()).execute()
+        }
 
     /** Performs a form POST and returns the decoded body. */
-    suspend fun postForm(url: String, params: Map<String, String>, ajax: Boolean = true): String =
+    suspend fun postForm(
+        url: String,
+        params: Map<String, String>,
+        ajax: Boolean = true,
+        foreground: Boolean = false,
+    ): String =
         withContext(Dispatchers.IO) {
+            RequestThrottle.acquire(foreground)
             val form = FormBody.Builder()
             params.forEach { (k, v) -> form.add(k, v) }
             val builder = Request.Builder().url(url).post(form.build())
@@ -109,6 +119,7 @@ class Net(context: Context) {
 
     suspend fun postMultipart(url: String, builder: okhttp3.MultipartBody.Builder): String =
         withContext(Dispatchers.IO) {
+            RequestThrottle.acquire(false)
             val rb = url.startsWith("https://") || url.startsWith("http://")
             val req = Request.Builder()
                 .url(if (rb) url else Site.baseUrl + url)

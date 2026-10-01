@@ -21,6 +21,7 @@ data class ThreadItem(
     val images: List<String> = emptyList(),
     val typeName: String = "",
     val isRead: Boolean = false,
+    val hasHiddenContent: Boolean = false,
     val special: Int = 0,          // 0 normal, 1 poll, 2 trade, 3 reward, 4 activity
     val loopType: Int = 0,
     val heat: Int = 0,

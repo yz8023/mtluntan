@@ -20,12 +20,12 @@ import kotlinx.coroutines.withContext
 class ForumRepository(private val net: Net) {
 
     suspend fun guide(view: String, page: Int): List<ThreadItem> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.guide(view, page))
+        val html = net.get(ApiUris.guide(view, page), foreground = true)
         ThreadListParser.parse(html).items
     }
 
     suspend fun forumIndex(): List<ForumCategory> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.forumIndex())
+        val html = net.get(ApiUris.forumIndex(), foreground = true)
         ForumIndexParser.parse(html)
     }
 
@@ -35,22 +35,22 @@ class ForumRepository(private val net: Net) {
         orderby: String = "",
         filter: String = "",
     ): List<ThreadItem> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.forumDisplay(fid, page, orderby, filter))
+        val html = net.get(ApiUris.forumDisplay(fid, page, orderby, filter), foreground = true)
         ThreadListParser.parse(html).items
     }
 
     suspend fun threadDetail(tid: Long, page: Int): ThreadDetail = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.viewThread(tid, page))
+        val html = net.get(ApiUris.viewThread(tid, page), foreground = true)
         ThreadDetailParser.parse(html, page)
     }
 
     suspend fun threadDetailPc(tid: Long, page: Int): ThreadDetail = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.viewThreadPc(tid, page))
+        val html = net.get(ApiUris.viewThreadPc(tid, page), foreground = true)
         ThreadDetailParser.parse(html, page)
     }
 
     suspend fun fetchEditor(url: String): EditorMeta = withContext(Dispatchers.IO) {
-        val html = net.get(url)
+        val html = net.get(url, foreground = true)
         EditorParser.parseEditor(html, url)
     }
 
@@ -61,7 +61,7 @@ class ForumRepository(private val net: Net) {
             val html = net.postForm(url, mapOf(
                 "formhash" to formhash, "posttime" to "", "wysiwyg" to "0",
                 "subject" to title, "message" to message, "usesig" to "1", "noticetrimstr" to "",
-            ))
+            ), foreground = true)
             EditorParser.parseSubmit(html, url)
         }
 
@@ -72,7 +72,7 @@ class ForumRepository(private val net: Net) {
             val html = net.postForm(url, mapOf(
                 "formhash" to formhash, "posttime" to "", "wysiwyg" to "0",
                 "message" to message, "usesig" to "1", "reppid" to "", "noticeauthor" to "",
-            ))
+            ), foreground = true)
             EditorParser.parseSubmit(html, url)
         }
 
@@ -85,7 +85,7 @@ class ForumRepository(private val net: Net) {
                 "message" to message, "usesig" to "1",
             )
             if (title.isNotEmpty()) params["subject"] = title
-            val html = net.postForm(url, params)
+            val html = net.postForm(url, params, foreground = true)
             EditorParser.parseSubmit(html, url)
         }
 
@@ -94,7 +94,7 @@ class ForumRepository(private val net: Net) {
             val html = net.postForm(
                 ApiUris.likeAction(tid, pid, formhash),
                 mapOf("formhash" to formhash, "tid" to tid.toString(), "pid" to pid.toString()),
-                ajax = true,
+                ajax = true, foreground = true,
             )
             html.contains("成功") && !html.contains("失败")
         } catch (e: Exception) { false }
@@ -102,43 +102,43 @@ class ForumRepository(private val net: Net) {
 
     suspend fun favorite(tid: Long, formhash: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            net.postForm(ApiUris.favoriteAction(tid, formhash), mapOf("formhash" to formhash))
+            net.postForm(ApiUris.favoriteAction(tid, formhash), mapOf("formhash" to formhash), foreground = true)
             true
         } catch (e: Exception) { false }
     }
 
     suspend fun myThreads(uid: Long, page: Int): List<ThreadItem> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.myThreads(uid, page))
+        val html = net.get(ApiUris.myThreads(uid, page), foreground = true)
         ThreadListParser.parse(html).items
     }
 
     suspend fun myReplies(uid: Long, page: Int): List<ThreadItem> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.myReplies(uid, page))
+        val html = net.get(ApiUris.myReplies(uid, page), foreground = true)
         ThreadListParser.parse(html).items
     }
 
     suspend fun profile(uid: Long) = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.space(uid))
+        val html = net.get(ApiUris.space(uid), foreground = true)
         UserPagesParser.parseProfile(html)
     }
 
     suspend fun myProfile() = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.space(0, doWhat = "profile"))
+        val html = net.get(ApiUris.space(0, doWhat = "profile"), foreground = true)
         UserPagesParser.parseProfile(html)
     }
 
     suspend fun search(q: String, page: Int): List<ThreadItem> = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.search(q, page))
+        val html = net.get(ApiUris.search(q, page), foreground = true)
         ThreadListParser.parse(html).items
     }
 
     suspend fun notices() = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.notice())
+        val html = net.get(ApiUris.notice(), foreground = true)
         UserPagesParser.parseNotices(html)
     }
 
     suspend fun pms() = withContext(Dispatchers.IO) {
-        val html = net.get(ApiUris.noticePm())
+        val html = net.get(ApiUris.noticePm(), foreground = true)
         UserPagesParser.parsePmList(html)
     }
 

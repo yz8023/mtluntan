@@ -35,30 +35,44 @@ object ThreadListParser : BaseParser() {
     // ---------- mobile comiis card ----------
 
     private fun parseComiisCard(doc: Document): List<ThreadItem> {
-        val items = doc.select("li.forumlist_li.comiis_znalist")
+        // Reference-tested selector: li.forumlist_li (broad). Real mobile HTML
+        // does not reliably carry the .comiis_znalist subclass.
+        var items = doc.select("li.forumlist_li")
+        if (items.isEmpty()) {
+            // Fallback: any li containing a thread link (thread- / viewthread / tid=)
+            val parents = mutableListOf<Element>()
+            doc.select("a[href*=\"thread-\"], a[href*=\"viewthread\"], a[href*=\"tid=\"]").forEach { link ->
+                val p = link.closest("li")
+                if (p != null && parents.none { it === p }) parents.add(p)
+            }
+            items = org.jsoup.select.Elements(parents)
+        }
         return items.mapNotNull { li ->
-            val titleEl = li.select(".mmlist_li_box h2 a").firstOrNull()
-                ?: li.select(".mmlist_li_box .list_body a").firstOrNull() ?: return@mapNotNull null
+            val titleEl = li.select(".mmlist_li_box h2 a[href*=\"thread-\"], .mmlist_li_box h2 a[href*=\"viewthread\"], .mmlist_li_box h2 a[href*=\"tid=\"]").firstOrNull()
+                ?: li.select("a[href*=\"thread-\"], a[href*=\"viewthread\"], a[href*=\"tid=\"]").firstOrNull() ?: return@mapNotNull null
             val href = titleEl.attr("href")
             val tid = UrlUtil.tid(href)
             if (tid == 0L) return@mapNotNull null
-            val boardEl = li.select(".comiis_xznalist_bk a, a[href*=\"forum-\"], a[href*=\"forumdisplay\"]").firstOrNull()
-            val avatarHref = li.select("a.wblist_tximg, a[href*=\"space&uid=\"]").firstOrNull()?.attr("href")
-            val authorEl = li.select(".top_user, a[href*=\"space-username-\"]").firstOrNull()
-            val statLis = li.select(".comiis_xznalist_bottom li")
+            val boardEl = li.select(".comiis_xznalist_bk a[href*=\"forum-\"]").firstOrNull()
+                ?: li.select("a[href*=\"forum-\"], a[href*=\"forumdisplay\"]").firstOrNull()
+            val avatarHref = li.select(".forumlist_li_top .top_tximg, a[href*=\"space&uid=\"]").firstOrNull()?.attr("href")
+            val authorEl = li.select(".forumlist_li_top .top_user, .top_user, a[href*=\"space-username-\"]").firstOrNull()
+            val statLis = li.select(".comiis_xznalist_bottom li .comiis_tm")
             var likes = 0; var replies = 0; var views = 0
             if (statLis.size > 0) likes = TextUtil.intOf(statLis[0].text())
             if (statLis.size > 1) replies = TextUtil.intOf(statLis[1].text())
             if (statLis.size > 2) views = TextUtil.intOf(statLis[2].text())
-            val imgs = li.select(".comiis_pyqlist_imgs img, .comiis_pyqlist_imgs li img")
-                .map { it.attr("src").ifBlank { it.attr("data-src") } }
+            val imgs = li.select(".comiis_pyqlist_imgs img, .comiis_pyqlist_imgs li img, .mmlist_li_box img")
+                .map { firstNonEmptyAttr(it, "comiis_loadimages", "data-original", "data-src", "data-file", "file", "src") }
                 .filter { it.isNotEmpty() }
                 .map { abs(it) }
                 .take(9)
-            val summaryEl = li.select(".list_body").firstOrNull()
+            val summaryEl = li.select(".list_body .f_b").firstOrNull()
+            val hidden = summaryEl?.text()?.contains("本内容被作者隐藏") == true
+            val timeEl = li.select(".forumlist_li_time .f_d, .forumlist_li_time").firstOrNull()
             ThreadItem(
                 threadId = tid,
-                title = Parsing.textExcluding(titleEl, setOf("span", "i")),
+                title = titleEl.ownText().trim().ifEmpty { Parsing.text(titleEl) },
                 summary = summaryEl?.let { Parsing.cleanText(it) } ?: "",
                 authorUid = UrlUtil.uid(avatarHref),
                 authorName = Parsing.text(authorEl),
@@ -69,10 +83,19 @@ object ThreadListParser : BaseParser() {
                 likes = likes,
                 replies = replies,
                 views = views,
-                postTime = Parsing.text(li.select(".forumlist_li_time span, .forumlist_li_time").firstOrNull()),
+                postTime = Parsing.text(timeEl),
                 images = imgs,
+                hasHiddenContent = hidden,
             )
         }
+    }
+
+    private fun firstNonEmptyAttr(el: Element, vararg names: String): String {
+        for (n in names) {
+            val v = el.attr(n)
+            if (v.isNotEmpty() && !v.endsWith("none.gif") && !v.endsWith("blank.gif") && !v.endsWith("common_empty.gif")) return v
+        }
+        return ""
     }
 
     // ---------- comiis table (PC + mobile hybrid) ----------

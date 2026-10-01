@@ -53,7 +53,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     suspend fun load() {
         loading = true
         try {
-            val d = app.forum.threadDetailPc(tid, page)
+            val d = app.forum.threadDetail(tid, page)
             detail = d
             if (d.loginRequired) {
                 error = "需要先登录"
