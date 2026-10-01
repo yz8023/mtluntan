@@ -58,8 +58,12 @@ class WafInterceptor(
                 maxAgeSeconds = 3600,
             )
             attempts++
+            // Preserve existing jar cookies (auth etc.); only replace the
+            // challenge value. A bare .header("Cookie", solved) would drop
+            // the session cookie and silently log the user out.
+            val existing = request.header("Cookie").orEmpty().trim()
             request = request.newBuilder()
-                .header("Cookie", solved)
+                .header("Cookie", mergeCookies(existing, solved))
                 .build()
         }
     }
@@ -72,5 +76,14 @@ class WafInterceptor(
     private fun looksLikeChallenge(body: String): Boolean {
         if (body.length > 20000) return false
         return body.contains("var arg1=") && body.contains("acw_sc__v2")
+    }
+
+    /** Joins a session cookie string with the solved challenge cookie. */
+    private fun mergeCookies(existing: String, solved: String): String {
+        if (existing.isEmpty()) return solved
+        val parts = existing.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+        val name = solved.substringBefore("=").trim()
+        val kept = parts.filterNot { it.substringBefore("=").trim() == name }
+        return (kept + solved).joinToString("; ")
     }
 }

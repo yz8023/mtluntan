@@ -12,11 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
@@ -42,6 +42,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
 import io.mtluntan.app.domain.model.Account
+import io.mtluntan.app.ui.navigation.Routes
 import kotlinx.coroutines.launch
 
 /** 我的: account switch, check-in, history, favorites, settings. */
@@ -58,7 +59,16 @@ fun MineScreen(app: MTLuntanApp, nav: NavHostController) {
         topBar = { TopAppBar(title = { Text("我的") }) },
     ) { pad ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(pad)) {
-            item { AccountHeader(activeName, accounts.find { it.username == activeName }) }
+            item {
+                AccountHeader(
+                    name = activeName,
+                    account = accounts.find { it.username == activeName },
+                    onClick = {
+                        if (activeName == null) nav.navigate(Routes.LOGIN)
+                        else nav.navigate("settings")
+                    },
+                )
+            }
             item {
                 ListItem(
                     headlineContent = { Text("每日签到") },
@@ -113,7 +123,7 @@ fun MineScreen(app: MTLuntanApp, nav: NavHostController) {
             if (activeName != null) {
                 item {
                     ListItem(
-                        leadingContent = { Icon(Icons.Filled.Logout, null) },
+                        leadingContent = { Icon(Icons.AutoMirrored.Filled.Logout, null) },
                         headlineContent = { Text("退出登录") },
                         modifier = Modifier.fillMaxWidth().clickable {
                             scope.launch { app.auth.activate(null) }
@@ -127,8 +137,11 @@ fun MineScreen(app: MTLuntanApp, nav: NavHostController) {
 }
 
 @Composable
-private fun AccountHeader(name: String?, account: Account?) {
-    Card(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+private fun AccountHeader(name: String?, account: Account?, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(16.dp),

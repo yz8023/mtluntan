@@ -2,45 +2,55 @@ package io.mtluntan.app
 
 import io.mtluntan.app.data.network.WafChallengeSolver
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Verifies we correctly solve the real acw_sc__v2 challenge the CDN served. */
+/** Verifies the acw_sc__v2 solver against real challenge pages served by the CDN. */
 class WafChallengeSolverTest {
 
-    private val realChallenge = """
-        <html><script>
-        var a='3'['con'+'cat'];var arg1='F30CC6DCE153795BC2884CAE1759B11887A86DDB';
-        var _0x4574=['document','timer','2679dfEyzRB','0\x3a3C','encodeURIComponent','161065sYQdHD','location','unescape','6HsVSYH','res=y','length','12YYavfx','reset','href','1040931ZyPZJf','10lVOXlc','1869508PoSBnI','1355869EcKpTm','19SJzAAK','requestAnimationFrame','picorns','function','2vfWYai','style','1SrERuz','24cBdhBJ','wowNbwDJEzLoBV','cookie','113UuxxBX'];
-        var m=['m', 'rn...'];
-        function rpm(i,m){for(var x=0;x<m.length;x++){if(m[x][0]==i)return m[x][1]}}
-        var v=arg1.slice(0,8);
-        var _0x6f2d=function(a2){return a2};
-        var m2=[['2','5','3','4','1'],['9','6','0','7','8','5','4','3','2','1'],['3','6','9','3','6','9']];
-        var _0x3608=function(a3){var r=[0,1,2,3,4,5,6,7,8,9]; var p=103368}; // placeholder
-        var p='3000176000856006061501533003690027800375';
-        document[L(0x121)]='acw_sc__v2='+v+L(0x120)+new Date(Date[L(0x119)]()+0x36ee80)[L(0x10c)]()+L(0x109),document[L(0xfe)][L(0x103)]();
-        </script></html>
-    """.trimIndent()
+    @Test
+    fun solvesRealChallengeA() {
+        val html = load("challenge_a.html")
+        val cookie = WafChallengeSolver.solve(html)
+        assertTrue("challenge A must be solvable", cookie != null && cookie.startsWith("acw_sc__v2="))
+        assertEquals(
+            "acw_sc__v2=6abeb44dc461b82bd57e9f6c707b8a8a3c83e574",
+            cookie,
+        )
+    }
 
     @Test
-    fun detectChallenge() {
-        val cookie = WafChallengeSolver.solve(realChallenge)
-        assertNotNull("challenge should be solvable", cookie)
-        assertTrue(cookie!!.startsWith("acw_sc__v2="))
-        assertTrue(cookie.length > "acw_sc__v2=".length)
+    fun solvesRealChallengeB() {
+        val html = load("challenge_b.html")
+        val cookie = WafChallengeSolver.solve(html)
+        assertTrue("challenge B must be solvable", cookie != null && cookie.startsWith("acw_sc__v2="))
+        assertEquals(
+            "acw_sc__v2=6abe9c24adcaad72dfea1c13c302770537563196",
+            cookie,
+        )
     }
 
     @Test
     fun nonChallengeReturnsNull() {
         val normal = "<html><body><h1>hello</h1></body></html>"
-        assertEquals(null, WafChallengeSolver.solve(normal))
+        assertNull(WafChallengeSolver.solve(normal))
     }
 
     @Test
-    fun importantiRejectsBrokenScript() {
+    fun missingArg1ReturnsNull() {
         val broken = "<html><script>var x=1;</script></html>"
-        assertEquals(null, WafChallengeSolver.solve(broken))
+        assertNull(WafChallengeSolver.solve(broken))
+    }
+
+    @Test
+    fun shortArg1ReturnsNull() {
+        val broken = """<html><script>var arg1='1234';</script></html>"""
+        assertNull(WafChallengeSolver.solve(broken))
+    }
+
+    private fun load(name: String): String {
+        return javaClass.classLoader!!.getResourceAsStream(name)!!
+            .bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
 }
