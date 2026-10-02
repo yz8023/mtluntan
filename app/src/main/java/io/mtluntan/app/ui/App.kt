@@ -96,7 +96,10 @@ import io.mtluntan.app.ui.screen.GuideScreen
 import io.mtluntan.app.ui.screen.HistoryScreen
 import io.mtluntan.app.ui.screen.LoginScreen
 import io.mtluntan.app.ui.screen.MineScreen
+import io.mtluntan.app.ui.screen.FollowersScreen
+import io.mtluntan.app.ui.screen.NoticeListScreen
 import io.mtluntan.app.ui.screen.NoticeScreen
+import io.mtluntan.app.ui.screen.PmListScreen
 import io.mtluntan.app.ui.screen.OfflinePostsScreen
 import io.mtluntan.app.ui.screen.PmChatScreen
 import io.mtluntan.app.ui.screen.ProfileScreen
@@ -278,6 +281,19 @@ fun App(app: MTLuntanApp) {
                             arguments = listOf(navArgument("fid") { type = NavType.LongType }),
                         ) { back ->
                             EditorScreen(app, navController, fid = back.arguments?.getLong("fid") ?: 0L)
+                        }
+
+                        composable(Routes.PM_LIST) { PmListScreen(app, navController) }
+                        composable(Routes.FOLLOWERS) { FollowersScreen(app, navController) }
+                        composable(
+                            Routes.NOTICE_LIST,
+                            arguments = listOf(navArgument("view") { type = NavType.StringType }),
+                        ) { back ->
+                            NoticeListScreen(
+                                app = app,
+                                nav = navController,
+                                view = back.arguments?.getString("view").orEmpty().ifBlank { "mypost" },
+                            )
                         }
 
                         composable(Routes.SEARCH) { SearchScreen(app, navController) }

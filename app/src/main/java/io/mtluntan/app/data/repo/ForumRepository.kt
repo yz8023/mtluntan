@@ -377,6 +377,31 @@ class ForumRepository(private val net: Net) {
         if (list.isNotEmpty()) list else UserPagesParser.parseNotices(html)
     }
 
+    /**
+     * 通知分类页（消息页六个入口里的四个）。
+     * @param view mypost / interactive / system / app
+     */
+    suspend fun notices(view: String): List<Notice> = withContext(Dispatchers.IO) {
+        val html = net.get(ApiUris.noticeView(view), foreground = true)
+        val list = SocialParser.parseNoticeList(html)
+        if (list.isNotEmpty()) list else UserPagesParser.parseNotices(html)
+    }
+
+    /** 粉丝列表（uid=0 表示自己）。 */
+    suspend fun followers(uid: Long = 0): List<SocialParser.FriendEntry> = withContext(Dispatchers.IO) {
+        val target = if (uid > 0) uid else discoverSelfUid()
+        if (target <= 0) return@withContext emptyList()
+        val html = net.get(ApiUris.followers(target), foreground = true)
+        SocialParser.parseFollowers(html)
+    }
+
+    /**
+     * 取当前登录账号的 uid：本地账号库里没有就从个人页补一次。
+     * （粉丝页 / 关注页都要 uid，不能拿 0 去请求。）
+     */
+    suspend fun discoverSelfUid(): Long =
+        runCatching { io.mtluntan.app.MTLuntanApp.instanceOrNull()?.auth?.activeUid() ?: 0L }.getOrDefault(0L)
+
     suspend fun pms(): List<PmSession> = withContext(Dispatchers.IO) {
         val html = net.get(ApiUris.noticePm(), foreground = true)
         SocialParser.parsePmSessions(html)

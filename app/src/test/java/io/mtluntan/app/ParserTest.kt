@@ -3,6 +3,7 @@ package io.mtluntan.app
 import io.mtluntan.app.data.parser.ThreadListParser
 import io.mtluntan.app.data.parser.ForumIndexParser
 import io.mtluntan.app.data.parser.ThreadDetailParser
+import io.mtluntan.app.data.parser.UserPagesParser
 import io.mtluntan.app.data.parser.BbcToHtml
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -108,5 +109,109 @@ class ParserTest {
         val html = """<html><body><form><input type="text" name="username"/><input type="submit" name="loginsubmit" value="登录"/></form></body></html>"""
         val check = io.mtluntan.app.data.parser.Parsing.checkPageError(Jsoup.parse(html), html)
         assertTrue(check.loginRequired)
+    }
+
+    // ---------------- 账号用户名识别（用户反馈「名字识别错」） ----------------
+
+    @Test
+    fun profileUsernameFromComiisHeader() {
+        val html = """
+            <html><body>
+            <div class="comiis_space_info">
+              <div class="comiis_space_tx">
+                <div class="user_img"><img src="uc_server/avatar.php?uid=42&size=middle"></div>
+                <h2 class="fyy">张三</h2>
+                <span class="kmlevs kmlv">Lv.7</span>
+                <span class="kmlev">硕士生</span>
+              </div>
+            </div>
+            <li>用户ID <span class="profile_rs">42</span></li>
+            </body></html>
+        """.trimIndent()
+        val profile = UserPagesParser.parseProfile(html)
+        assertEquals("张三", profile.username)
+        assertEquals(42L, profile.uid)
+    }
+
+    @Test
+    fun profileUsernameNotConfusedByGroupOrStats() {
+        // h2 里是用户组、旁边全是统计数字时，不能把「硕士生 / Lv.7 / 帖子」当名字
+        val html = """
+            <html><body>
+            <div class="comiis_space_tx">
+              <img src="uc_server/avatar.php?uid=7">
+              <h2 class="fyy">李四</h2>
+              <span class="kmlev">硕士生</span>
+              <span class="xg1">最后访问 2026-10-01</span>
+            </div>
+            <ul class="comiis_space_profileico">
+              <li><em>帖子</em><span>128</span></li>
+              <li><em>积分</em><span>999</span></li>
+            </ul>
+            </body></html>
+        """.trimIndent()
+        val profile = UserPagesParser.parseProfile(html)
+        assertEquals("李四", profile.username)
+    }
+
+    @Test
+    fun profileUsernameFromWelcomeTextWhenHeaderMissing() {
+        // 登录校验页没有个人页头部，只有「欢迎您回来」
+        val html = """
+            <html><body>
+            <div class="tip">欢迎您回来，王五，现在将转入登录前页面</div>
+            </body></html>
+        """.trimIndent()
+        val profile = UserPagesParser.parseProfile(html)
+        assertEquals("王五", profile.username)
+    }
+
+    @Test
+    fun sanitizeUsernameStripsSuffixes() {
+        assertEquals("赵六", UserPagesParser.sanitizeUsername("赵六 的个人资料"))
+        assertEquals("赵六", UserPagesParser.sanitizeUsername("赵六的空间"))
+        assertEquals("赵六", UserPagesParser.sanitizeUsername("赵六 - MT论坛"))
+        assertEquals("", UserPagesParser.sanitizeUsername("登录"))
+        assertEquals("", UserPagesParser.sanitizeUsername("12345"))
+    }
+
+    @Test
+    fun looksLikeUsernameRejectsJunk() {
+        assertTrue(UserPagesParser.looksLikeUsername("abc123"))
+        assertTrue(UserPagesParser.looksLikeUsername("老王"))
+        assertTrue(!UserPagesParser.looksLikeUsername("Lv.7"))
+        assertTrue(!UserPagesParser.looksLikeUsername("帖子 128"))
+        assertTrue(!UserPagesParser.looksLikeUsername("手机版"))
+    }
+
+    @Test
+    fun mobileThreadMarksMainPostAndReplies() {
+        // 移动模板：div.comiis_postli，第一条是楼主（正文），其余是评论
+        val html = """
+            <html><body>
+            <div class="comiis_viewtit"><h2><div class="km_tits">测试主题</div></h2></div>
+            <div class="comiis_postli" id="pid100">
+              <div class="comiis_postli_top">
+                <a class="top_user f_b" href="home.php?mod=space&amp;uid=1">楼主甲</a>
+                <a class="postli_top_tximg"><img class="top_tximg" src="uc_server/avatar.php?uid=1"></a>
+                <div class="comiis_postli_time"><span class="kmtime">2026-10-01</span></div>
+              </div>
+              <div class="comiis_message">这是正文内容</div>
+            </div>
+            <div class="comiis_postli" id="pid101">
+              <div class="comiis_postli_top">
+                <a class="top_user f_b" href="home.php?mod=space&amp;uid=2">楼层乙</a>
+                <div class="comiis_postli_time"><span class="kmtime">2026-10-02</span></div>
+              </div>
+              <div class="comiis_message">这是评论内容</div>
+            </div>
+            <div class="comiis_pager"><span class="prev">1</span><span class="next">3</span></div>
+            </body></html>
+        """.trimIndent()
+        val detail = ThreadDetailParser.parse(html, 1)
+        assertTrue(detail.mainPost?.isMainPost == true)
+        assertEquals("楼主甲", detail.mainPost?.authorName)
+        assertEquals(1, detail.posts.size)
+        assertEquals("楼层乙", detail.posts.first().authorName)
     }
 }

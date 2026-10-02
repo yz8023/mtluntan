@@ -72,10 +72,13 @@ fun seedSchemeFor(seed: Color, dark: Boolean, shade: Float): ColorScheme {
     val tertiary = tinted(-42f, 0.9f, 1.06f)
 
     val background = if (dark) mix(Night, primary, 0.10f + s * 0.14f)
-    else mix(Paper, primary, 0.02f + s * 0.06f)
+    else mix(Paper, primary, 0.03f + s * 0.07f)
     val onBackground = if (dark) NightText else Ink
-    val container = if (dark) mix(Night, primary, 0.16f + s * 0.10f)
-    else mix(Color(0xFFF2F4F8), primary, 0.08f + s * 0.12f)
+    // 容器（卡片/面板）必须明显区别于背景并且**带主题色** —— 用户反馈
+    // 「所有卡片内部有一层白色底色」：根因是容器由近白色 #F2F4F8 混出来，
+    // 浓度低时几乎就是白色。现在直接用主题色染，深/浅两档都保证有颜色。
+    val container = if (dark) mix(Night, primary, 0.20f + s * 0.14f)
+    else mix(background, primary, 0.16f + s * 0.20f)
 
     val onPrimary = if (primary.luminance() > 0.5f) Color(0xFF101418) else Color.White
     val primaryContainer = if (dark) mix(primary, Color.White, 0.18f) else mix(primary, Color.White, 0.78f)
@@ -88,12 +91,12 @@ fun seedSchemeFor(seed: Color, dark: Boolean, shade: Float): ColorScheme {
             secondary = secondary, tertiary = tertiary,
             background = background, onBackground = onBackground,
             surface = background, onSurface = onBackground,
-            surfaceVariant = mix(container, Color.White, 0.12f), onSurfaceVariant = Color(0xFFC1C7CE),
+            surfaceVariant = mix(container, primary, 0.12f), onSurfaceVariant = Color(0xFFC1C7CE),
             surfaceContainer = container,
-            surfaceContainerLow = background,
-            surfaceContainerLowest = mix(background, Color.Black, 0.25f),
-            surfaceContainerHigh = mix(container, Color.White, 0.05f),
-            surfaceContainerHighest = mix(container, Color.White, 0.09f),
+            surfaceContainerLow = mix(background, primary, 0.06f),
+            surfaceContainerLowest = mix(background, Color.Black, 0.22f),
+            surfaceContainerHigh = mix(container, primary, 0.10f),
+            surfaceContainerHighest = mix(container, Color.White, 0.10f),
             outline = Color(0xFF8B929A),
             outlineVariant = mix(container, Color.White, 0.14f),
             error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
@@ -105,12 +108,12 @@ fun seedSchemeFor(seed: Color, dark: Boolean, shade: Float): ColorScheme {
             secondary = secondary, tertiary = tertiary,
             background = background, onBackground = onBackground,
             surface = background, onSurface = onBackground,
-            surfaceVariant = mix(container, Color.White, 0.45f), onSurfaceVariant = Color(0xFF45494E),
+            surfaceVariant = container, onSurfaceVariant = Color(0xFF45494E),
             surfaceContainer = container,
-            surfaceContainerLow = mix(background, Color.White, 0.4f),
-            surfaceContainerLowest = Color.White,
-            surfaceContainerHigh = mix(container, Color.Black, 0.04f),
-            surfaceContainerHighest = mix(container, Color.Black, 0.08f),
+            surfaceContainerLow = mix(background, primary, 0.10f + s * 0.08f),
+            surfaceContainerLowest = background,
+            surfaceContainerHigh = mix(container, primary, 0.10f),
+            surfaceContainerHighest = mix(container, Color.Black, 0.07f),
             outline = Color(0xFF767B82),
             outlineVariant = mix(container, Color.Black, 0.10f),
             error = Color(0xFFB3261E), onError = Color.White,

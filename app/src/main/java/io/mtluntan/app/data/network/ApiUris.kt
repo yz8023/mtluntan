@@ -66,6 +66,14 @@ object ApiUris {
     /** Notifications page. */
     fun notice(): String = "$SITE/home.php?mod=space&do=notice&mobile=2"
 
+    /** 通知分类页：mypost（我的帖子）/ interactive（坛友互动）/ system（系统提醒）/ app（应用提醒）。 */
+    fun noticeView(view: String): String =
+        "$SITE/home.php?mod=space&do=notice&view=$view&mobile=2"
+
+    /** 粉丝列表（参考项目 NoticeFragment 的 follower 分类 URL）。 */
+    fun followers(uid: Long): String =
+        "$SITE/home.php?mod=follow&do=follower&uid=$uid&mobile=2"
+
     fun noticePm(): String = "$SITE/home.php?mod=space&do=pm&filter=privatepm&mobile=2"
 
     /** Search form + results. */

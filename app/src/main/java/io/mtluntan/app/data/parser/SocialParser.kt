@@ -182,6 +182,31 @@ object SocialParser : BaseParser() {
         return out.distinctBy { it.uid }
     }
 
+    /**
+     * 粉丝列表。
+     *
+     * 参考项目 `NoticeFragment` 的「我的粉丝」分类：URL 是
+     * `home.php?mod=follow&do=follower&uid=<me>&mobile=2`。这个页面没有统一模板，
+     * 所以这里用「凡是列表项里带 space-uid 链接的都算一个粉丝」的宽松策略，
+     * 拿不到就返回空（界面显示「暂无」而不是崩）。
+     */
+    fun parseFollowers(html: String): List<FriendEntry> {
+        val strict = parseFriends(html)
+        if (strict.isNotEmpty()) return strict
+        val doc = Parsing.doc(html)
+        val out = mutableListOf<FriendEntry>()
+        for (a in doc.select("a[href*=space-uid-], a[href*=\"space&uid=\"]")) {
+            val uid = UrlUtil.uid(a.attr("href"))
+            if (uid <= 0) continue
+            val name = Parsing.text(a).trim()
+            // 过滤掉「查看全部 / 更多」这类功能链接和纯数字
+            if (name.isBlank() || name.length > 24) continue
+            if (name.contains("更多") || name.contains("全部") || name.all { it.isDigit() }) continue
+            out += FriendEntry(uid = uid, name = name, avatarUrl = Site.avatarUrl(uid))
+        }
+        return out.distinctBy { it.uid }
+    }
+
     /** 关注状态：好友页 / 空间页上的「加关注 / 已关注」按钮。 */
     fun parseFollowing(html: String): Boolean? {
         val doc = Parsing.doc(html)

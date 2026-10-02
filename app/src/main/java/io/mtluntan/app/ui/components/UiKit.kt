@@ -60,6 +60,8 @@ fun Modifier.mtGlassSurface(
     glassOverride: GlassLevel? = null,
 ): Modifier {
     val glass = glassOverride ?: LocalGlass.current
+    // 基色取「容器色」——它带主题色（不再用近白的中性色），
+    // 这样卡片内部不会出现一层白底（用户反馈「所有卡片都有白色底色」）。
     val base = tint ?: MaterialTheme.colorScheme.surfaceContainer
     val fill = if (glass == GlassLevel.Off) base else base.copy(alpha = glass.surfaceAlpha)
     var mod = this
@@ -70,6 +72,33 @@ fun Modifier.mtGlassSurface(
         mod = mod.border(
             width = 1.dp,
             color = Color.White.copy(alpha = glass.borderAlpha * 0.35f),
+            shape = shape,
+        )
+    }
+    return mod
+}
+
+/**
+ * 嵌套卡片表面（评论气泡 / 引用框）。
+ *
+ * 参考项目 `item_reply.xml` 的 `reply_nested_bg`：**半透明底色 + 1dp 描边 + 12dp 圆角**，
+ * 跟外层容器区分开，但又不是白底（底色用主题容器色）。
+ * 玻璃档位越高越透，关闭玻璃时用不透明容器色。
+ */
+@Composable
+fun Modifier.mtNestedSurface(
+    shape: Shape = RoundedCornerShape(12.dp),
+    tint: Color? = null,
+    border: Boolean = true,
+): Modifier {
+    val glass = LocalGlass.current
+    val base = tint ?: MaterialTheme.colorScheme.surfaceContainerHigh
+    val fill = if (glass == GlassLevel.Off) base else base.copy(alpha = glass.surfaceAlpha * 0.92f)
+    var mod = this.clip(shape).background(fill)
+    if (border) {
+        mod = mod.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (glass == GlassLevel.Off) 0.5f else 0.8f),
             shape = shape,
         )
     }
@@ -90,6 +119,7 @@ fun MtCard(
     tint: Color? = null,
     padding: PaddingValues = PaddingValues(14.dp),
     glass: Boolean = false,
+    nested: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -97,7 +127,8 @@ fun MtCard(
     var mod = modifier
         .fillMaxWidth()
         .pressScale(interaction)
-    if (glass) mod = mod.mtGlassSurface(shape = shape, tint = tint)
+    if (nested) mod = mod.mtNestedSurface(shape = shape, tint = tint)
+    else if (glass) mod = mod.mtGlassSurface(shape = shape, tint = tint)
     if (onClick != null) mod = mod.clickable(interactionSource = interaction, indication = null, onClick = onClick)
     Column(modifier = mod.padding(padding), content = content)
 }

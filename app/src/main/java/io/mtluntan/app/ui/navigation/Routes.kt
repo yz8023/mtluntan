@@ -32,6 +32,9 @@ object Routes {
 
     // 社交
     const val PROFILE = "profile/{uid}"
+    const val PM_LIST = "pmlist"
+    const val NOTICE_LIST = "notices/{view}"
+    const val FOLLOWERS = "followers"
     const val PM = "pm/{uid}/{name}"
     const val FRIENDS = "friends/{uid}"
     const val BLACKLIST = "blacklist"
@@ -48,6 +51,7 @@ object Routes {
     fun editReply(tid: Long, pid: Long) = "editreply/$tid/$pid"
     fun newThread(fid: Long) = "new/$fid"
     fun profile(uid: Long) = "profile/$uid"
+    fun noticeList(view: String) = "notices/$view"
     fun pm(uid: Long, name: String) = "pm/$uid/${enc(name)}"
     fun friends(uid: Long) = "friends/$uid"
     fun aiChat(sessionId: Long) = "ai/$sessionId"

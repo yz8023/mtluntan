@@ -241,11 +241,20 @@ class AuthRepository(
         val cookieString = cookieRepo.exportCookieString(handle)
         if (cookieString.isBlank()) return@withContext false to "登录成功但没拿到会话，请重试"
 
+        // 名字必须过合法性校验：站点模板一变就可能抓到「用户组 / 等级 / 时间」这类噪声，
+        // 那样账号名就错了（用户反馈「还得手动改名」）。不合格就退到用户输入的登录名。
+        val typed = io.mtluntan.app.data.parser.UserPagesParser.sanitizeUsername(user)
+        val parsedName = profile?.username.orEmpty()
+            .takeIf { io.mtluntan.app.data.parser.UserPagesParser.looksLikeUsername(it) }
+            .orEmpty()
+        val finalName = parsedName.ifEmpty {
+            if (io.mtluntan.app.data.parser.UserPagesParser.looksLikeUsername(typed)) typed else ""
+        }
         val outcome = importStaged(
             cookieString = cookieString,
-            username = profile?.username.orEmpty().ifBlank { user },
+            username = finalName,
             uid = profile?.uid ?: 0,
-            nickname = profile?.username.orEmpty().ifBlank { user },
+            nickname = finalName,
             avatar = profile?.avatarUrl.orEmpty(),
             group = profile?.groupName.orEmpty(),
             credits = profile?.creditsText.orEmpty(),
@@ -253,7 +262,10 @@ class AuthRepository(
         )
         cookieRepo.clearForAccount(handle)
         when (outcome) {
-            is ImportOutcome.Ok -> true to (if (outcome.isNew) "已添加账号：${outcome.username}" else "已更新账号：${outcome.username}")
+            is ImportOutcome.Ok -> {
+                val note = if (parsedName.isEmpty() && finalName.isNotEmpty()) "（没能识别到昵称，先用登录名，可在账号页「编辑」改）" else ""
+                true to (if (outcome.isNew) "已添加账号：${outcome.username}$note" else "已更新账号：${outcome.username}$note")
+            }
             ImportOutcome.NeedName -> false to "登录成功但没识别到身份，请改用 Cookie 导入"
         }
     }
@@ -444,6 +456,31 @@ class AuthRepository(
         }
         withTimeoutOrNull(timeoutMs) { restoreGate.await() }
         return settings.activeAccount.first()
+    }
+
+    /**
+     * 当前账号的 uid。本地库没有就先从个人页补一次（很多页面都要 uid：粉丝、关注、空间）。
+     * 补到的身份会写回本地账号，用户自己改过的备注名不会被覆盖。
+     */
+    suspend fun activeUid(): Long = withContext(Dispatchers.IO) {
+        val name = SessionHolder.activeAccount.value ?: return@withContext 0L
+        val entity = runCatching { db.accountDao().byUsername(name) }.getOrNull() ?: return@withContext 0L
+        if (entity.uid > 0) return@withContext entity.uid
+        val profile = runCatching {
+            io.mtluntan.app.MTLuntanApp.instanceOrNull()?.forum?.profile(0)
+        }.getOrNull() ?: return@withContext 0L
+        if (profile.uid > 0) {
+            runCatching {
+                db.accountDao().updateProfile(
+                    username = entity.username,
+                    uid = profile.uid,
+                    nickname = entity.nickname.ifBlank { profile.username },
+                    avatar = entity.avatarUrl.ifBlank { profile.avatarUrl },
+                    group = entity.groupName.ifBlank { profile.groupName },
+                )
+            }
+        }
+        profile.uid
     }
 
     fun isSessionPresent(): Boolean = cookieRepo.exportCookieString(SessionHolder.activeAccount.value).isNotEmpty()
