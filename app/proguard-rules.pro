@@ -27,3 +27,6 @@
 
 # Keep our models referenced from Gson/Room
 -keepnames class io.mtluntan.app.** { *; }
+# Gson 反射映射的本地数据结构：字段名一旦被 R8 重命名 / 裁剪，
+# 已保存的 cookies/*.json 就会读成空会话（release 包才会出现的问题）。
+-keep class io.mtluntan.app.data.network.CookieRepository$* { *; }

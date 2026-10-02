@@ -81,13 +81,41 @@ object ApiUris {
     fun signAction(formhash: String): String =
         "$SITE/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash=$formhash"
 
-    /** like (支持/评分) action. */
-    fun likeAction(tid: Long, pid: Long, formhash: String): String =
+    /** like (支持/评分) action */
+    fun likeAction(tid: Long, pid: Long, formhash: String, add: Boolean = true): String =
         "$SITE/forum.php?mod=misc&action=like&tid=$tid&pid=$pid&formhash=$formhash&mobile=2"
 
     /** favorite action */
-    fun favoriteAction(tid: Long, formhash: String): String =
+    fun favoriteAction(tid: Long, formhash: String, add: Boolean = true): String =
         "$SITE/forum.php?mod=collect&action=favorite&tid=$tid&formhash=$formhash&mobile=2"
+
+    /** 点赞/推荐名单 */
+    fun recommendUsers(tid: Long, pid: Long): String =
+        "$SITE/forum.php?mod=misc&action=recommend&tid=$tid&pid=$pid&mobile=2"
+
+    /** 好友列表 */
+    fun friends(uid: Long): String =
+        "$SITE/home.php?mod=space&do=friend&uid=$uid&mobile=2"
+
+    /** 关注列表 */
+    fun following(uid: Long): String =
+        "$SITE/home.php?mod=space&do=follow&uid=$uid&mobile=2"
+
+    /** 积分明细 */
+    fun credits(uid: Long): String =
+        "$SITE/home.php?mod=spacecp&ac=credit&op=base&mobile=2" + if (uid > 0) "&uid=$uid" else ""
+
+    /** 私信会话 */
+    fun pmView(touid: Long): String =
+        "$SITE/home.php?mod=space&do=pm&subop=view&touid=$touid&mobile=2"
+
+    /** 通知「全部已读」 */
+    fun noticeMarkRead(): String =
+        "$SITE/home.php?mod=space&do=notice&view=mypost&isread=1&mobile=2"
+
+    /** 签到动作（相对路径形式，供带 ajax 头的 GET 使用） */
+    fun signActionPath(formhash: String): String =
+        "plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash=$formhash"
 
     fun loginPage(): String = "$SITE/member.php?mod=logging&action=login&mobile=2"
 

@@ -12,6 +12,19 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
+/** 依次在「根目录 / app 模块」找 keystore.properties 里指定的 keystore。 */
+val resolvedKeystore: File? = run {
+    val configured = keystoreProperties.getProperty("storeFile")
+    val candidates = listOfNotNull(
+        configured?.let { rootProject.file(it) },
+        configured?.let { file(it) },
+        rootProject.file("mtluntan.keystore"),
+        file("mtluntan.keystore"),
+        file("Mtluntan.keystore"),
+    )
+    candidates.firstOrNull { it.exists() }
+}
+
 android {
     namespace = "io.mtluntan.app"
     compileSdk = 34
@@ -28,7 +41,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(keystoreProperties.getProperty("storeFile") ?: "Mtluntan.keystore")
+            storeFile = resolvedKeystore ?: file(keystoreProperties.getProperty("storeFile") ?: "Mtluntan.keystore")
             storePassword = keystoreProperties.getProperty("storePassword") ?: "mtluntan2024"
             keyAlias = keystoreProperties.getProperty("keyAlias") ?: "mtluntan"
             keyPassword = keystoreProperties.getProperty("keyPassword") ?: "mtluntan2024"
@@ -37,7 +50,14 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // 仓库里没有提交 mtluntan.keystore：这时退回 debug 签名，让 assembleRelease
+            // 依然能产出可安装的包（官方发布时补上 keystore 就会自动改用正式签名）。
+            signingConfig = if (resolvedKeystore != null) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.lifecycle("⚠️  未找到 mtluntan.keystore，release 将使用 debug 签名（仅供本机测试安装）")
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

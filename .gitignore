@@ -9,3 +9,5 @@ captures/
 .cxx/
 *.keystore
 keystore.properties
+# 本地构建产物（APK 已单独放在仓库外的 apk/ 目录，避免污染提交）
+/apk/

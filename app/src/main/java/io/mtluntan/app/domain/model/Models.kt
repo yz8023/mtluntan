@@ -114,6 +114,7 @@ data class UserProfile(
 data class Account(
     val username: String = "",
     val uid: Long = 0,
+    val nickname: String = "",
     val avatarUrl: String = "",
     val cookieString: String = "",
     val isActive: Boolean = false,
@@ -121,6 +122,14 @@ data class Account(
     var lastCheckIn: String = "",
     var lastCheckInOk: Boolean = false,
     val creditsText: String = "",
+    /** 连续签到天数（签到插件回报）。 */
+    val signDays: Int = 0,
+    /** 参与定时/一键签到。 */
+    val enabled: Boolean = true,
+    /** 手动排序，越小越靠前。 */
+    val sortOrder: Int = 0,
+    val lastSignRank: Int = 0,
+    val lastSignReward: String = "",
 )
 
 /** A notification / message item. */
@@ -183,3 +192,89 @@ data class SubmitResult(
     val pid: Long = 0,
     val contentUrl: String = "",
 )
+
+/** 签到结果：账号、天数、排名、奖励一起带回，供记录中心与账号卡片使用。 */
+data class SignOutcome(
+    val ok: Boolean = false,
+    val alreadySigned: Boolean = false,
+    val loggedOut: Boolean = false,
+    val days: Int = 0,
+    val rank: Int = 0,
+    val reward: String = "",
+    val message: String = "",
+)
+
+/** 一条签到记录（账号维度的展示模型）。 */
+data class SignRecord(
+    val id: Long = 0,
+    val account: String = "",
+    val date: String = "",
+    val at: Long = 0,
+    val ok: Boolean = false,
+    val alreadySigned: Boolean = false,
+    val rank: Int = 0,
+    val reward: String = "",
+    val message: String = "",
+)
+
+/** 私信会话中的一条气泡。 */
+data class ChatMessage(
+    val id: Long = 0,
+    val fromMe: Boolean = false,
+    val authorName: String = "",
+    val body: String = "",
+    val time: String = "",
+)
+
+/** 私信会话条目（消息页列表）。 */
+data class PmSession(
+    val uid: Long = 0,
+    val username: String = "",
+    val avatarUrl: String = "",
+    val lastMessage: String = "",
+    val time: String = "",
+    val unread: Int = 0,
+    val url: String = "",
+)
+
+/** 用户空间里的一条动态（主题 / 回复）。 */
+data class SpacePost(
+    val tid: Long = 0,
+    val title: String = "",
+    val boardName: String = "",
+    val time: String = "",
+    val replies: Int = 0,
+    val views: Int = 0,
+)
+
+/** 积分条目。 */
+data class CreditItem(
+    val name: String = "",
+    val value: String = "",
+    val delta: String = "",
+    val time: String = "",
+)
+
+/** 帖子里的附件。 */
+data class Attachment(
+    val name: String = "",
+    val url: String = "",
+    val size: String = "",
+    val cost: Int = 0,
+)
+
+/** 点赞/打赏用户。 */
+data class LikeUser(
+    val uid: Long = 0,
+    val name: String = "",
+    val avatarUrl: String = "",
+    val time: String = "",
+)
+
+/** 未读角标计数。 */
+data class BadgeCounts(
+    val notices: Int = 0,
+    val pms: Int = 0,
+) {
+    val total: Int get() = notices + pms
+}

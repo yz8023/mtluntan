@@ -17,6 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -129,4 +133,69 @@ fun DetailTopBar(title: String) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
+}
+/**
+ * 帖子 / 用户快速跳转（Java 版 v4.0 的 UID / TID 直达）。
+ *
+ * 直接粘一串链接也能用：链接里的 tid= / uid= 会被自动识别出来，
+ * 所以从浏览器复制过来的地址不用手动裁。
+ */
+@Composable
+fun QuickJumpDialog(
+    onDismiss: () -> Unit,
+    onJumpThread: (Long) -> Unit,
+    onJumpUser: (Long) -> Unit,
+) {
+    var input by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+
+    val tid = remember(input) { io.mtluntan.app.util.UrlUtil.tid(input).takeIf { it > 0 } ?: input.filter { it.isDigit() }.toLongOrNull() ?: 0L }
+    val uid = remember(input) { io.mtluntan.app.util.UrlUtil.uid(input).takeIf { it > 0 } ?: 0L }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("快速跳转") },
+        text = {
+            Column {
+                Text(
+                    "输入帖子 tid、用户 uid，或直接粘一整条链接。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; message = "" },
+                    label = { Text("tid / uid / 链接") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (message.isNotEmpty()) {
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                    Text(message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                }
+                if (tid > 0 || uid > 0) {
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                    Text(
+                        buildString {
+                            if (tid > 0) append("识别为帖子 $tid ")
+                            if (uid > 0) append("用户 $uid")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                when {
+                    tid > 0 -> { onJumpThread(tid); onDismiss() }
+                    uid > 0 -> { onJumpUser(uid); onDismiss() }
+                    else -> message = "没识别出 tid / uid，检查一下输入"
+                }
+            }) { Text(if (uid > 0 && tid == 0L) "打开用户" else "打开帖子") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }

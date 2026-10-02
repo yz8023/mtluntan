@@ -124,6 +124,91 @@ class LocalRepository(private val db: AppDatabase) {
                 io.mtluntan.app.data.db.entity.ThreadCacheEntity(tid, title, mainHtml, postsHtml)
             )
         }
+
+    // ---------- 阅读进度 ----------
+
+    suspend fun historyFor(tid: Long): HistoryRecord? = withContext(Dispatchers.IO) {
+        db.historyDao().byTid(tid)?.let {
+            HistoryRecord(it.id, it.tid, it.title, it.boardName, it.authorName, it.readAt)
+        }
+    }
+
+    suspend fun progressFor(tid: Long): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        val h = db.historyDao().byTid(tid) ?: return@withContext 1 to 1
+        h.lastFloor to h.totalPages
+    }
+
+    // ---------- 黑名单 ----------
+
+    val blacklist: Flow<List<io.mtluntan.app.data.db.entity.BlacklistEntity>> =
+        db.blacklistDao().observeAll()
+
+    suspend fun addBlacklist(uid: Long, name: String, reason: String = "") = withContext(Dispatchers.IO) {
+        db.blacklistDao().upsert(io.mtluntan.app.data.db.entity.BlacklistEntity(uid, name, reason))
+    }
+
+    suspend fun removeBlacklist(uid: Long) = withContext(Dispatchers.IO) {
+        db.blacklistDao().delete(uid)
+    }
+
+    suspend fun isBlacklisted(uid: Long): Boolean = withContext(Dispatchers.IO) {
+        db.blacklistDao().byUid(uid) != null
+    }
+
+    // ---------- 关注状态 ----------
+
+    suspend fun setFollowing(uid: Long, name: String, following: Boolean) = withContext(Dispatchers.IO) {
+        db.followDao().upsert(io.mtluntan.app.data.db.entity.FollowEntity(uid, name, following))
+    }
+
+    suspend fun following(uid: Long): Boolean? = withContext(Dispatchers.IO) {
+        db.followDao().byUid(uid)?.following
+    }
+
+    // ---------- 离线帖子 ----------
+
+    val offlinePosts: Flow<List<io.mtluntan.app.data.db.entity.OfflinePostEntity>> =
+        db.offlinePostDao().observeAll()
+
+    /** 保存当前帖子为离线页面（正文与评论一起存）。 */
+    suspend fun saveOffline(tid: Long, title: String, boardName: String = "", authorName: String = ""): String =
+        withContext(Dispatchers.IO) {
+            try {
+                val app = io.mtluntan.app.MTLuntanApp.instanceOrNull()
+                    ?: return@withContext "应用未就绪"
+                val html = app.forum.threadHtml(tid, 1)
+                db.offlinePostDao().upsert(
+                    io.mtluntan.app.data.db.entity.OfflinePostEntity(
+                        tid = tid,
+                        title = title,
+                        boardName = boardName,
+                        authorName = authorName,
+                        html = html,
+                    )
+                )
+                "已保存离线页面（${html.length / 1024} KB）"
+            } catch (t: Throwable) {
+                "保存失败：${t.message}"
+            }
+        }
+
+    suspend fun removeOffline(tid: Long) = withContext(Dispatchers.IO) {
+        db.offlinePostDao().delete(tid)
+    }
+
+    suspend fun offline(tid: Long) = withContext(Dispatchers.IO) {
+        db.offlinePostDao().byTid(tid)
+    }
+
+    // ---------- 解锁认领 ----------
+
+    fun unlockClaims(): Flow<List<io.mtluntan.app.data.db.entity.UnlockClaimEntity>> =
+        db.unlockClaimDao().observeRecent(200)
+
+    suspend fun clearUnlockClaims() = withContext(Dispatchers.IO) {
+        db.unlockClaimDao().clear()
+    }
+
 }
 
 private fun Draft.key(): String = "$type:${tid}:${fid}"

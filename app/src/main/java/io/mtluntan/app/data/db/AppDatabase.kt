@@ -5,17 +5,30 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import io.mtluntan.app.data.db.dao.AccountDao
+import io.mtluntan.app.data.db.dao.AiDao
+import io.mtluntan.app.data.db.dao.BlacklistDao
 import io.mtluntan.app.data.db.dao.DraftDao
 import io.mtluntan.app.data.db.dao.FavoriteDao
+import io.mtluntan.app.data.db.dao.FollowDao
 import io.mtluntan.app.data.db.dao.HistoryDao
+import io.mtluntan.app.data.db.dao.OfflinePostDao
 import io.mtluntan.app.data.db.dao.ReadMarkDao
+import io.mtluntan.app.data.db.dao.SignRecordDao
 import io.mtluntan.app.data.db.dao.ThreadCacheDao
+import io.mtluntan.app.data.db.dao.UnlockClaimDao
 import io.mtluntan.app.data.db.entity.AccountEntity
+import io.mtluntan.app.data.db.entity.AiMessageEntity
+import io.mtluntan.app.data.db.entity.AiSessionEntity
+import io.mtluntan.app.data.db.entity.BlacklistEntity
 import io.mtluntan.app.data.db.entity.DraftEntity
 import io.mtluntan.app.data.db.entity.FavoriteEntity
+import io.mtluntan.app.data.db.entity.FollowEntity
 import io.mtluntan.app.data.db.entity.HistoryEntity
+import io.mtluntan.app.data.db.entity.OfflinePostEntity
 import io.mtluntan.app.data.db.entity.ReadMarkEntity
+import io.mtluntan.app.data.db.entity.SignRecordEntity
 import io.mtluntan.app.data.db.entity.ThreadCacheEntity
+import io.mtluntan.app.data.db.entity.UnlockClaimEntity
 
 @Database(
     entities = [
@@ -25,8 +38,15 @@ import io.mtluntan.app.data.db.entity.ThreadCacheEntity
         FavoriteEntity::class,
         ThreadCacheEntity::class,
         ReadMarkEntity::class,
+        SignRecordEntity::class,
+        UnlockClaimEntity::class,
+        BlacklistEntity::class,
+        FollowEntity::class,
+        AiSessionEntity::class,
+        AiMessageEntity::class,
+        OfflinePostEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +56,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun threadCacheDao(): ThreadCacheDao
     abstract fun readMarkDao(): ReadMarkDao
+    abstract fun signRecordDao(): SignRecordDao
+    abstract fun unlockClaimDao(): UnlockClaimDao
+    abstract fun blacklistDao(): BlacklistDao
+    abstract fun followDao(): FollowDao
+    abstract fun aiDao(): AiDao
+    abstract fun offlinePostDao(): OfflinePostDao
 
     companion object {
         @Volatile

@@ -29,17 +29,25 @@ import io.mtluntan.app.domain.model.Forum
 import io.mtluntan.app.domain.model.ForumCategory
 import io.mtluntan.app.ui.navigation.Routes
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /** Community / forum index. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null) {
+fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer: () -> Unit = {}) {
+    val tabTick by io.mtluntan.app.util.Refresh.tabTick.collectAsStateWithLifecycle(initialValue = 0)
+    val generation by io.mtluntan.app.util.Refresh.generation.collectAsStateWithLifecycle(initialValue = 0)
     var categories by remember { mutableStateOf<List<ForumCategory>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(tabTick, generation) {
         loading = true
         try {
             categories = app.forum.forumIndex()
@@ -51,7 +59,13 @@ fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null) {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("社区") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("社区") },
+                navigationIcon = { IconButton(onClick = onOpenDrawer) { Icon(Icons.Filled.Menu, "菜单") } },
+                actions = { IconButton(onClick = { nav?.navigate(Routes.SEARCH) }) { Icon(Icons.Filled.Search, "搜索") } },
+            )
+        },
     ) { pad ->
         Column(modifier = Modifier.fillMaxSize().padding(pad)) {
             when {

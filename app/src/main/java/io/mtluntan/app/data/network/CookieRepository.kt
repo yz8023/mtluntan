@@ -159,6 +159,17 @@ class CookieRepository(context: Context) {
         getFile(key).delete()
     }
 
+    /** 导出该账号当前整串 Cookie（账号快照回存用；auth 必须与 saltkey 配套，整串存取）。 */
+    fun exportCookieString(account: String?): String {
+        val key = keyFor(account)
+        val jar = jarFor(key)
+        val now = System.currentTimeMillis()
+        return jar.values.flatten()
+            .filter { it.expiresAt > now }
+            .distinctBy { it.name }
+            .joinToString("; ") { "${it.name}=${it.value}" }
+    }
+
     // ---- disk ----
 
     private fun getFile(key: String) = java.io.File(baseDir, "$key.json")
