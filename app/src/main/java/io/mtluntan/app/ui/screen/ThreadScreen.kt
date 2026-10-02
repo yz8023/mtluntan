@@ -140,6 +140,11 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     var favorited by remember { mutableStateOf(false) }
 
     val likedPids = remember { mutableStateListOf<Long>() }
+    // 评论「拼接」：用户要求「下一页直接接到当前页，不用再返回」——
+    // 每翻一页就把该页评论追加到列表尾部（appendedPages），不替换当前内容；
+    // 同时保留「上一页（收起最后一页）/ 回到第 1 页」的入口，避免又出现「回不去」。
+    val appendedPages = remember { mutableStateListOf<List<io.mtluntan.app.domain.model.Post>>() }
+    var appending by remember { mutableStateOf(false) }
     val editablePids = remember { mutableStateListOf<Long>() }
     val deletablePids = remember { mutableStateListOf<Long>() }
     var menuPost by remember { mutableStateOf<Post?>(null) }
@@ -184,9 +189,11 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 error = ""
                 app.local.recordVisit(tid, parsed.title, parsed.forumName, parsed.mainPost?.authorName ?: "", targetPage, parsed.totalPages)
                 app.local.markRead(tid)
-                // 评论按「页」翻：翻到第几页就只显示这一页，绝不把下一页拼到当前页
-                // （用户反馈：拼在一起之后就回不到上一页了，所以保持整页切换）
+                // 评论翻页：首次/跳页时只加载这一页，「下一页」再把后续页拼接到列表尾部
+                // （用户要求拼接；同时用吸顶条提供「上一页/回第 1 页」，避免又出现「回不去」）
                 favorited = app.local.isFavorite(tid)
+                // 整页加载（首次进入 / 继续阅读 / 跳页）时清掉之前拼接进来的后续页
+                appendedPages.clear()
                 likedPids.clear(); likedPids.addAll(if (parsed.likedByCurrent) listOf(parsed.mainPost?.pid ?: 0L) else emptyList())
                 editablePids.clear(); editablePids.addAll(ThreadExtrasParser.editablePids(html))
                 deletablePids.clear(); deletablePids.addAll(ThreadExtrasParser.deletablePids(html))
@@ -217,6 +224,33 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
         loading = false
         PerfLog.record(PerfLog.Span(name = "帖子页 $tid", netMs = System.currentTimeMillis() - started))
         if (!keepScroll) runCatching { listState.scrollToItem(0) }
+    }
+
+    /**
+     * 把下一页评论**拼接**到当前列表末尾（不替换已读内容、不改变滚动位置）。
+     * 页码推进靠 appendedPages.size，失败不推进，可重试。
+     */
+    suspend fun appendNextPage() {
+        val d = detail ?: return
+        val next = d.currentPage + appendedPages.size + 1
+        if (appending) return
+        if (next > d.totalPages) {
+            CopyUtil.toast(context, "已经是最后一页了")
+            return
+        }
+        appending = true
+        try {
+            val html = app.forum.threadHtml(tid, next)
+            val parsed = io.mtluntan.app.data.parser.ThreadDetailParser.parse(html, next)
+            val existing = (listOfNotNull(d.mainPost) + d.posts + appendedPages.flatten()).map { it.pid }.toSet()
+            val fresh = parsed.posts.filter { it.pid !in existing }
+            if (fresh.isEmpty()) CopyUtil.toast(context, "第 $next 页没有新回复")
+            // 即使这一页没有新楼层也占位推进，避免「下一页」卡在同一页
+            appendedPages.add(fresh)
+        } catch (e: Exception) {
+            CopyUtil.toast(context, "加载第 $next 页失败：${e.message}")
+        }
+        appending = false
     }
 
     val generation by Refresh.generation.collectAsStateWithLifecycle(initialValue = 0)
@@ -255,7 +289,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collectLatest { index ->
                 delay(800)
-                val floors = listOfNotNull(detail?.mainPost) + detail?.posts.orEmpty()
+                val floors = listOfNotNull(detail?.mainPost) + detail?.posts.orEmpty() + appendedPages.flatten()
                 val hit = floors.getOrNull(index) ?: return@collectLatest
                 if (hit.floor > 0 && hit.floor != lastFloorSeen) {
                     lastFloorSeen = hit.floor
@@ -438,8 +472,24 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 }
                 current == null -> MessageBox("加载失败")
                 else -> {
-                    val posts = (listOfNotNull(current.mainPost) + current.posts).distinctBy { it.pid }
-                        .let { list -> if (hideBlacklist) list else list }
+                    // 当前页 + 已拼接的后续页（按 pid 去重，页码顺序保持）
+                    val posts = (listOfNotNull(current.mainPost) + current.posts + appendedPages.flatten())
+                        .distinctBy { it.pid }
+                    val loadedThrough = current.currentPage + appendedPages.size
+                    val goPrev: () -> Unit = {
+                        if (appendedPages.isNotEmpty()) {
+                            // 「上一页」= 收起最后一页拼接（本地操作，不用重新请求）
+                            appendedPages.removeAt(appendedPages.lastIndex)
+                        } else if (page > 1) {
+                            page--
+                            scope.launch { load(page) }
+                        }
+                    }
+                    val goNext: () -> Unit = { scope.launch { appendNextPage() } }
+                    val goFirst: () -> Unit = {
+                        appendedPages.clear()
+                        if (page != 1) { page = 1; scope.launch { load(1) } }
+                    }
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         if (offlineMode) {
                             item {
@@ -488,7 +538,14 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                     Text(current.title, style = MaterialTheme.typography.titleLarge)
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
                                         if (current.forumName.isNotBlank()) Text(current.forumName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                        Text("第 ${current.currentPage}/${current.totalPages} 页", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                        Text(
+                                            if (appendedPages.isNotEmpty())
+                                                "第 ${current.currentPage}-${current.currentPage + appendedPages.size}/${current.totalPages} 页（已拼接）"
+                                            else
+                                                "第 ${current.currentPage}/${current.totalPages} 页",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.outline,
+                                        )
                                         if (ThreadExtrasParser.hiddenBlocks(pageHtml).any { it.locked }) {
                                             Text("含隐藏内容", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
                                         }
@@ -521,16 +578,19 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 }
                             }
                         }
-                        if (!offlineMode && current.posts.isNotEmpty() && current.totalPages > 1) {
+                        if (!offlineMode && current.totalPages > 1) {
                             // 吸顶翻页条：翻页后列表会回到顶部，底部那条看不见 → 这条一直贴在顶部，
                             // 用户随时能「上一页」，不会再出现「翻过去就回不来」的体感。
                             stickyHeader(key = "pager-top") {
                                 Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
                                     CommentPagerRow(
-                                        page = current.currentPage,
+                                        startPage = current.currentPage,
+                                        loadedThrough = loadedThrough,
                                         total = current.totalPages,
-                                        onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
-                                        onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                        appending = appending,
+                                        onPrev = goPrev,
+                                        onNext = goNext,
+                                        onFirst = goFirst,
                                     )
                                 }
                             }
@@ -583,14 +643,17 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                             }
                             // 楼层之间不再画分隔线：评论改成气泡后靠层次区分（用户不喜欢竖条/横线）
                         }
-                        if (!offlineMode && current.posts.isNotEmpty() && current.totalPages > 1) {
+                        if (!offlineMode && current.totalPages > 1) {
                             // 页尾再放一条：读完这页顺手翻页
                             item(key = "pager-bottom") {
                                 CommentPagerRow(
-                                    page = current.currentPage,
+                                    startPage = current.currentPage,
+                                    loadedThrough = loadedThrough,
                                     total = current.totalPages,
-                                    onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
-                                    onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                    appending = appending,
+                                    onPrev = goPrev,
+                                    onNext = goNext,
+                                    onFirst = goFirst,
                                 )
                             }
                         }
@@ -601,7 +664,10 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                     horizontalArrangement = Arrangement.Center,
                                 ) {
                                     Text(
-                                        "已显示 ${posts.size} 楼 · 第 ${current.currentPage}/${current.totalPages} 页",
+                                        if (loadedThrough > current.currentPage)
+                                            "已拼接 ${posts.size} 楼 · 第 ${current.currentPage}-${loadedThrough}/${current.totalPages} 页"
+                                        else
+                                            "已显示 ${posts.size} 楼 · 第 ${current.currentPage}/${current.totalPages} 页",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.outline,
                                     )
@@ -611,10 +677,12 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                         item {
                             if (current != null) {
                                 PageFooter(
-                                    current = current.currentPage,
+                                    start = current.currentPage,
+                                    through = loadedThrough,
                                     total = current.totalPages,
-                                    onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
-                                    onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                    busy = appending,
+                                    onPrev = goPrev,
+                                    onNext = goNext,
                                 )
                             }
                         }
@@ -1336,9 +1404,24 @@ private fun ReplySheet(
  * 列表底部页脚：页码 + 上一页 / 下一页。
  * 代替原来贴在输入框上方的那一条（用户反馈不需要那条）。
  */
-/** 评论区翻页条（顶部/底部各一条，纯整页切换，不做拼接）。 */
+/**
+ * 评论区翻页条（吸顶一条 + 页尾一条）。
+ *
+ * 行为（用户要求）：点「下一页」是**拼接**，直接把下一页评论接到列表后面，
+ * 已读内容不动、位置不动；「上一页」= 收起最后一页拼接（本地操作，立刻回到上一页的结尾）；
+ * 拼接超过一页时多给一个「回第 1 页」。
+ */
 @Composable
-private fun CommentPagerRow(page: Int, total: Int, onPrev: () -> Unit, onNext: () -> Unit) {
+private fun CommentPagerRow(
+    startPage: Int,
+    loadedThrough: Int,
+    total: Int,
+    appending: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onFirst: () -> Unit,
+) {
+    val multi = loadedThrough > startPage
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         shape = RoundedCornerShape(12.dp),
@@ -1346,25 +1429,51 @@ private fun CommentPagerRow(page: Int, total: Int, onPrev: () -> Unit, onNext: (
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
-            TextButton(onClick = onPrev, enabled = page > 1) { Text("上一页") }
+            TextButton(
+                onClick = onPrev,
+                enabled = multi || startPage > 1,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) { Text("上一页", style = MaterialTheme.typography.labelLarge) }
             Text(
-                "评论区 第 $page / $total 页",
+                if (multi) "评论 第 $startPage-$loadedThrough/$total 页（已拼接）"
+                else "评论区 第 $startPage/$total 页",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 10.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
             )
-            TextButton(onClick = onNext, enabled = page < total) { Text("下一页") }
+            if (appending) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                TextButton(
+                    onClick = onNext,
+                    enabled = loadedThrough < total,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                ) { Text(if (multi) "接着拼＋" else "下一页＋", style = MaterialTheme.typography.labelLarge) }
+            }
+            if (multi || startPage > 1) {
+                TextButton(
+                    onClick = onFirst,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
+                ) { Text("回第 1 页", style = MaterialTheme.typography.labelMedium) }
+            }
         }
     }
 }
 
 @Composable
 private fun PageFooter(
-    current: Int,
+    start: Int,
+    through: Int,
     total: Int,
+    busy: Boolean,
     onPrev: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -1373,14 +1482,16 @@ private fun PageFooter(
         horizontalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        TextButton(onClick = onPrev, enabled = current > 1) { Text("上一页") }
+        TextButton(onClick = onPrev, enabled = through > start || start > 1) { Text("上一页") }
         Text(
-            "第 $current / $total 页（整页切换，不会拼接）",
+            if (through > start) "第 $start-$through / $total 页（下一页拼接，可收起）"
+            else "第 $start / $total 页（下一页接着拼）",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp),
         )
-        TextButton(onClick = onNext, enabled = current < total) { Text("下一页") }
+        if (busy) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+        else TextButton(onClick = onNext, enabled = through < total) { Text("下一页＋") }
     }
 }
 
