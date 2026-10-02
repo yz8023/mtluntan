@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtDivider
 import io.mtluntan.app.domain.model.Forum
 import io.mtluntan.app.domain.model.ForumCategory
 import io.mtluntan.app.ui.components.MtButton
@@ -96,13 +98,14 @@ fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDraw
                                 modifier = Modifier.padding(start = 10.dp, end = 10.dp),
                             )
                         }
-                        items(
+                        itemsIndexed(
                             items = category.forums,
-                            key = { forum -> "forum-$catIndex-${forum.id}-${forum.name}" },
-                        ) { forum ->
+                            key = { _, forum -> "forum-$catIndex-${forum.id}-${forum.name}" },
+                        ) { index, forum ->
                             ForumRow(forum) {
                                 nav?.navigate(Routes.forum(forum.id, forum.name))
                             }
+                            if (index < category.forums.lastIndex) MtDivider(startIndent = 20.dp)
                         }
                     }
                 }

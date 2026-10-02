@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,6 +53,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtDivider
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.domain.model.ChatMessage
 import io.mtluntan.app.domain.model.Notice
 import io.mtluntan.app.domain.model.PmSession
@@ -153,7 +156,7 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
                 tab == 0 -> {
                     if (notices.isEmpty()) MessageBox("暂无通知")
                     else LazyColumn {
-                        items(notices, key = { "${it.type}-${it.url}-${it.body.take(20)}" }) { n ->
+                        itemsIndexed(notices, key = { _, n -> "${n.type}-${n.url}-${n.body.take(20)}" }) { index, n ->
                             NoticeRow(n, onAction = {
                                 if (n.url.isNotBlank()) {
                                     val tid = io.mtluntan.app.util.UrlUtil.tid(n.url)
@@ -169,14 +172,16 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
                                 }
                                 CopyUtil.copy(context, n.body, "通知内容已复制")
                             })
+                            if (index < notices.lastIndex) MtDivider(startIndent = 20.dp)
                         }
                     }
                 }
                 else -> {
                     if (pms.isEmpty()) MessageBox("暂无私信（或需要登录）")
                     else LazyColumn {
-                        items(pms, key = { it.uid }) { session ->
+                        itemsIndexed(pms, key = { _, it -> it.uid }) { index, session ->
                             PmRow(session) { nav?.navigate(Routes.pm(session.uid, session.username)) }
+                            if (index < pms.lastIndex) MtDivider(startIndent = 20.dp)
                         }
                     }
                 }
@@ -194,7 +199,7 @@ private fun NoticeRow(n: Notice, onAction: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     val long = n.body.length > 80 || n.body.count { it == '\n' } > 2
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
+    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (n.isNew) {
@@ -246,7 +251,7 @@ private fun typeLabel(type: Int): String = when (type) {
 
 @Composable
 private fun PmRow(session: PmSession, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
+    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.clickable(onClick = onClick).padding(12.dp),

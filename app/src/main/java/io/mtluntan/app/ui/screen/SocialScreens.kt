@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.data.parser.SocialParser
 import io.mtluntan.app.domain.model.CreditItem
 import io.mtluntan.app.domain.model.ThreadItem
@@ -273,7 +274,7 @@ fun FriendsScreen(app: MTLuntanApp, nav: NavHostController, uid: Long) {
             else if (friends.isEmpty()) MessageBox("没有公开的好友列表")
             else LazyColumn {
                 items(friends, key = { it.uid }) { f ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
+                    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier

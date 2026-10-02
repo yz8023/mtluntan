@@ -231,6 +231,54 @@ class AuthRepository(
         )
     }
 
+    /**
+     * 用户手动编辑账号资料（昵称 / UID / 头像），空值就是空值，不做「只增不减」的补全。
+     */
+    suspend fun updateProfile(
+        username: String,
+        uid: Long,
+        nickname: String,
+        avatar: String,
+    ) = withContext(Dispatchers.IO) {
+        db.accountDao().updateProfile(username, uid, nickname.trim(), avatar.trim())
+        LogCenter.log(LogTag.RUN, "编辑账号资料：$username")
+    }
+
+    /**
+     * 这串 Cookie 是不是已经加过的账号？
+     *
+     * 修「点添加账号又进了已登录那个号」：WebView 里还挂着上一个账号的会话时，
+     * 一打开就等于「已登录」，旧逻辑直接把同一个会话又导入一遍 / 认成新账号。
+     * 现在先按 `*_auth` 指纹（同一设备同一账号稳定不变）在本地账号里找，
+     * 找到就认为是老账号（刷新会话即可），找不到才走「新账号」流程。
+     */
+    suspend fun accountForCookie(cookieString: String): Account? = withContext(Dispatchers.IO) {
+        val all = db.accountDao().getAll()
+        if (all.isEmpty()) return@withContext null
+        val fp = cookieFingerprint(cookieString)
+        if (fp.isNotEmpty()) {
+            all.firstOrNull { cookieFingerprint(it.cookieString) == fp }?.let { return@withContext it.toAccount() }
+        }
+        val norm = normalizeCookie(cookieString)
+        all.firstOrNull { normalizeCookie(it.cookieString) == norm }?.toAccount()
+    }
+
+    /** 同一账号同一设备的 `*_auth`（+ saltkey）指纹；拿不到就返回空串。 */
+    private fun cookieFingerprint(cookieString: String): String {
+        val parts = cookieString.split(";").map { it.trim() }.filter { it.contains("=") }
+        val auth = parts.firstOrNull { it.substringBefore("=").endsWith("_auth") } ?: return ""
+        val salt = parts.firstOrNull { it.substringBefore("=").endsWith("_saltkey") }
+        return (auth + "|" + (salt ?: "")).lowercase(Locale.ROOT)
+    }
+
+    private fun normalizeCookie(cookieString: String): String =
+        cookieString.split(";")
+            .map { it.trim() }
+            .filter { it.contains("=") }
+            .map { it.lowercase(Locale.ROOT) }
+            .sorted()
+            .joinToString(";")
+
     /** 回存最新 Cookie 快照（重登成功后调用）。 */
     suspend fun refreshCookieSnapshot(username: String) = withContext(Dispatchers.IO) {
         val cur = db.accountDao().byUsername(username) ?: return@withContext

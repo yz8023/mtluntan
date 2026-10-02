@@ -1,6 +1,18 @@
 package io.mtluntan.app.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,9 +69,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +88,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtButton
+import io.mtluntan.app.ui.components.BbcToolbar
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.data.parser.BbcBlocks
 import io.mtluntan.app.data.parser.ThreadExtrasParser
 import io.mtluntan.app.ui.components.RevealItem
@@ -121,8 +134,15 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     var menuPost by remember { mutableStateOf<Post?>(null) }
     var likeUsersFor by remember { mutableStateOf<Post?>(null) }
     var likeUsers by remember { mutableStateOf<List<LikeUser>>(emptyList()) }
-    var replyText by remember { mutableStateOf("") }
+    var replyField by remember { mutableStateOf(TextFieldValue("")) }
     var quickSending by remember { mutableStateOf(false) }
+    // 点输入框 → 直接展开半屏回复面板（不再单独开一个编辑器页面）
+    var replySheet by remember { mutableStateOf(false) }
+    // 快捷短语与编辑器共用同一份设置
+    val quickPhrases by app.settings.quickReplies.collectAsStateWithLifecycle(initialValue = "")
+    val quickPhraseList = remember(quickPhrases) {
+        quickPhrases.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
     var galleryUrls by remember { mutableStateOf<List<String>?>(null) }
     var galleryIndex by remember { mutableIntStateOf(0) }
     var uploading by remember { mutableStateOf(false) }
@@ -371,39 +391,18 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
             )
         },
         bottomBar = {
-            Column {
-                if (current != null) {
-                    PagerBar(
-                        current = current.currentPage,
-                        total = current.totalPages,
-                        onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
-                        onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
-                        onJump = { p -> page = p.coerceIn(1, current.totalPages); scope.launch { load(page) } },
-                    )
-                    QuickReplyBar(
-                        value = replyText,
-                        onChange = { replyText = it },
-                        sending = quickSending,
-                        loggedIn = current.formhash.isNotEmpty(),
-                        onSend = {
-                            val text = replyText.trim()
-                            if (text.isEmpty()) return@QuickReplyBar
-                            quickSending = true
-                            scope.launch {
-                                val result = app.forum.submitReply(tid, current.formhash, text, current.fid)
-                                quickSending = false
-                                if (result.ok) {
-                                    replyText = ""
-                                    CopyUtil.toast(context, "回复成功")
-                                    load(page, keepScroll = true)
-                                } else {
-                                    CopyUtil.toast(context, result.error.ifBlank { "回复失败" })
-                                }
-                            }
-                        },
-                        onOpenEditor = { nav.navigate(Routes.reply(tid)) },
-                    )
-                }
+            val d = current
+            if (d != null) {
+                // 只留一个「写回复…」入口：点一下直接展开半屏面板（键盘自动弹出）。
+                // 原来输入框上面还压着一整条 首页/上一页/下一页，用户反馈不需要，已去掉；
+                // 翻页挪到列表底部的页脚，看图时就在眼前。
+                ReplyEntryBar(
+                    loggedIn = d.formhash.isNotEmpty(),
+                    onClick = {
+                        if (d.formhash.isNotEmpty()) replySheet = true
+                        else CopyUtil.toast(context, "登录后才能回复")
+                    },
+                )
             }
         },
     ) { pad ->
@@ -583,11 +582,57 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 }
                             }
                         }
+                        item {
+                            if (current != null) {
+                                PageFooter(
+                                    current = current.currentPage,
+                                    total = current.totalPages,
+                                    onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
+                                    onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                )
+                            }
+                        }
                         item { Spacer(Modifier.height(12.dp)) }
                     }
                 }
             }
         }
+    }
+
+    // ---------------- 半屏回复面板 ----------------
+    if (replySheet && current != null) {
+        val d = current
+        ReplySheet(
+            title = "回复：${d.title}",
+            value = replyField,
+            onChange = { replyField = it },
+            sending = quickSending,
+            loggedIn = d.formhash.isNotEmpty(),
+            phrases = quickPhraseList,
+            onDismiss = { replySheet = false },
+            onOpenFullEditor = {
+                replySheet = false
+                nav.navigate(Routes.reply(tid))
+            },
+            onWrap = { open, close -> wrapReply(replyField, open, close) { replyField = it } },
+            onSend = {
+                val text = replyField.text.trim()
+                if (text.isEmpty()) return@ReplySheet
+                quickSending = true
+                scope.launch {
+                    val result = app.forum.submitReply(tid, d.formhash, text, d.fid)
+                    quickSending = false
+                    if (result.ok) {
+                        replyField = TextFieldValue("")
+                        replySheet = false
+                        CopyUtil.toast(context, "回复成功")
+                        load(page, keepScroll = true)
+                    } else {
+                        CopyUtil.toast(context, result.error.ifBlank { "回复失败" })
+                    }
+                }
+            },
+        )
     }
 
     // ---------------- 楼层菜单 ----------------
@@ -708,66 +753,6 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     }
 }
 
-@Composable
-private fun QuickReplyBar(
-    value: String,
-    onChange: (String) -> Unit,
-    sending: Boolean,
-    loggedIn: Boolean,
-    onSend: () -> Unit,
-    onOpenEditor: () -> Unit,
-) {
-    Surface(tonalElevation = 3.dp) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onChange,
-                placeholder = { Text(if (loggedIn) "快速回复…" else "登录后可回复") },
-                enabled = loggedIn && !sending,
-                maxLines = 3,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(6.dp))
-            IconButton(onClick = onSend, enabled = loggedIn && !sending) {
-                Icon(Icons.AutoMirrored.Filled.Send, "发送", tint = MaterialTheme.colorScheme.primary)
-            }
-            TextButton(onClick = onOpenEditor, enabled = loggedIn) { Text("编辑器") }
-        }
-    }
-}
-
-@Composable
-private fun PagerBar(
-    current: Int,
-    total: Int,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-    onJump: (Int) -> Unit,
-) {
-    Surface(tonalElevation = 2.dp) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-        ) {
-            Row {
-                TextButton(onClick = onPrev, enabled = current > 1) { Text("上一页") }
-                TextButton(onClick = { onJump(1) }, enabled = current > 1) { Text("首页") }
-            }
-            Text("$current / $total 页", style = MaterialTheme.typography.labelMedium)
-            Row {
-                TextButton(onClick = { onJump(total) }, enabled = current < total) { Text("末页") }
-                TextButton(onClick = onNext, enabled = current < total) { Text("下一页") }
-            }
-        }
-    }
-}
-
 /** 单个楼层。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -784,7 +769,7 @@ fun PostCard(
     onReply: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(
@@ -967,4 +952,183 @@ private fun CollapsedFloor(author: String, floor: Int, onShow: () -> Unit) {
             TextButton(onClick = onShow) { Text("不再拉黑", style = MaterialTheme.typography.labelSmall) }
         }
     }
+}
+
+/**
+ * 底部回复入口：一行胶囊，点一下开半屏面板。
+ * 比原来「输入框 + 发送 + 编辑器」三个控件占的位置小得多，正文区域更大。
+ */
+@Composable
+private fun ReplyEntryBar(loggedIn: Boolean, onClick: () -> Unit) {
+    Surface(tonalElevation = 3.dp) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable(onClick = onClick)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.outline,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (loggedIn) "写回复…" else "登录后可以回复",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 半屏回复面板：点底部输入框立刻弹出，键盘自动聚焦，工具条与编辑器一致。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReplySheet(
+    title: String,
+    value: TextFieldValue,
+    onChange: (TextFieldValue) -> Unit,
+    sending: Boolean,
+    loggedIn: Boolean,
+    phrases: List<String>,
+    onDismiss: () -> Unit,
+    onOpenFullEditor: () -> Unit,
+    onWrap: (String, String) -> Unit,
+    onSend: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        // 打开就聚焦：省掉「点一下再点一下」的步骤
+        LaunchedEffect(Unit) {
+            delay(160)
+            runCatching { focusRequester.requestFocus() }
+            keyboard?.show()
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.62f)
+                .imePadding()
+                .padding(horizontal = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onOpenFullEditor) { Text("完整编辑器") }
+            }
+            OutlinedTextField(
+                value = value,
+                onValueChange = onChange,
+                placeholder = { Text(if (loggedIn) "输入回复内容（支持 BBCode）" else "登录后可以回复") },
+                enabled = loggedIn && !sending,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+            )
+            if (phrases.isNotEmpty() && loggedIn) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    phrases.take(12).forEach { phrase ->
+                        AssistChip(
+                            onClick = { onChange(TextFieldValue(value.text + phrase, TextRange(value.text.length + phrase.length))) },
+                            label = { Text(phrase, style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
+                }
+            }
+            BbcToolbar(
+                onWrap = onWrap,
+                onOpenFullEditor = onOpenFullEditor,
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            ) {
+                Spacer(Modifier.weight(1f))
+                MtButton(
+                    text = if (sending) "发送中…" else "发送",
+                    onClick = onSend,
+                    icon = Icons.AutoMirrored.Filled.Send,
+                    enabled = loggedIn && !sending && value.text.isNotBlank(),
+                    loading = sending,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 列表底部页脚：页码 + 上一页 / 下一页。
+ * 代替原来贴在输入框上方的那一条（用户反馈不需要那条）。
+ */
+@Composable
+private fun PageFooter(
+    current: Int,
+    total: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        TextButton(onClick = onPrev, enabled = current > 1) { Text("上一页") }
+        Text(
+            "第 $current / $total 页",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        TextButton(onClick = onNext, enabled = current < total) { Text("下一页") }
+    }
+}
+
+/** BBCode 包裹：把选区（或光标位置）包进标签，与编辑器行为一致。 */
+private fun wrapReply(
+    current: TextFieldValue,
+    open: String,
+    close: String,
+    apply: (TextFieldValue) -> Unit,
+) {
+    val start = current.selection.min.coerceIn(0, current.text.length)
+    val end = current.selection.max.coerceIn(start, current.text.length)
+    val selected = current.text.substring(start, end)
+    val newText = current.text.substring(0, start) + open + selected + close + current.text.substring(end)
+    val cursor = if (selected.isEmpty()) start + open.length else start + open.length + selected.length
+    apply(TextFieldValue(newText, TextRange(cursor)))
 }

@@ -44,6 +44,10 @@ interface AccountDao {
     @Query("UPDATE accounts SET enabled = :enabled WHERE username = :username")
     suspend fun setEnabled(username: String, enabled: Boolean)
 
+    /** 编辑账号资料：允许清空（updateInfo 只做「补全」，这里是用户在界面上的最终决定）。 */
+    @Query("UPDATE accounts SET uid = :uid, nickname = :nickname, avatarUrl = :avatar WHERE username = :username")
+    suspend fun updateProfile(username: String, uid: Long, nickname: String, avatar: String)
+
     @Query("UPDATE accounts SET sortOrder = :order WHERE username = :username")
     suspend fun setSortOrder(username: String, order: Int)
 

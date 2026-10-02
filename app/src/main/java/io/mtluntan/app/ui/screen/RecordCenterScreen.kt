@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.util.CopyUtil
 import io.mtluntan.app.util.LogCenter
@@ -98,7 +99,7 @@ fun RecordCenterScreen(app: MTLuntanApp, nav: NavHostController) {
                     if (entries.isEmpty()) MessageBox("还没有日志")
                     else LazyColumn {
                         items(entries.reversed(), key = { it.id }) { entry ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
+                            MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
                                 Column(modifier = Modifier.padding(10.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         TagDot(entry.tag.name)

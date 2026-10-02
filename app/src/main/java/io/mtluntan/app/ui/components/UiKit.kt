@@ -76,23 +76,48 @@ fun Modifier.mtGlassSurface(
     return mod
 }
 
-/** 玻璃卡片（带内边距）。 */
+/**
+ * 列表卡片。
+ *
+ * 用户反馈：「每个卡片都有一层底色的方框，很丑」——所以默认**不铺底色、不描边**，
+ * 只留按下反馈（缩放），列表用分隔线区分条目，视觉上干净、内容才是主体。
+ * 需要「浮起来」的容器（对话框、底栏、抽屉、封面）才传 `glass = true` 走玻璃表面。
+ */
 @Composable
 fun MtCard(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(18.dp),
     tint: Color? = null,
     padding: PaddingValues = PaddingValues(14.dp),
+    glass: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     var mod = modifier
         .fillMaxWidth()
-        .mtGlassSurface(shape = shape, tint = tint)
         .pressScale(interaction)
+    if (glass) mod = mod.mtGlassSurface(shape = shape, tint = tint)
     if (onClick != null) mod = mod.clickable(interactionSource = interaction, indication = null, onClick = onClick)
     Column(modifier = mod.padding(padding), content = content)
+}
+
+/**
+ * 列表分隔线。
+ *
+ * 卡片不打底色之后，靠它区分条目：比 Material 默认的分隔线更淡，
+ * 颜色取主题的 `outlineVariant`，换主题自动跟着走。
+ */
+@Composable
+fun MtDivider(
+    modifier: Modifier = Modifier,
+    startIndent: Dp = 14.dp,
+) {
+    androidx.compose.material3.HorizontalDivider(
+        modifier = modifier.padding(start = startIndent),
+        thickness = 1.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+    )
 }
 
 /** 分组标题：换主题时整块跟着变，不再各写各的。 */

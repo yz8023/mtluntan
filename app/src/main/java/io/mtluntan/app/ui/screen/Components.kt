@@ -4,13 +4,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -22,14 +29,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.AsyncImage
 import io.mtluntan.app.ui.components.MtCard
+import io.mtluntan.app.ui.components.MtDivider
 import io.mtluntan.app.domain.model.ThreadItem
 
 @Composable
@@ -46,28 +55,26 @@ fun MessageBox(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 帖子列表项。
+ *
+ * 三条硬要求（用户反馈「标题要对齐 / 纯文字帖和带图帖错位」）：
+ *  1. 缩略图**固定占位**：带图的显示图，纯文字帖显示统一的占位块，
+ *     所以每张卡片的标题都从同一个 x 开始，上下滑动不会参差不齐；
+ *  2. 卡片不打底色（只在按下时缩放反馈），列表用分隔线分条；
+ *  3. 摘要最多两行，元信息一行放不下就省略，卡片高度稳定。
+ */
 @Composable
 fun ThreadCard(item: ThreadItem, onClick: () -> Unit) {
     MtCard(
         onClick = onClick,
-        padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        modifier = Modifier.padding(horizontal = 6.dp),
     ) {
-        Row(modifier = Modifier.padding(12.dp)) {
-            if (item.images.isNotEmpty()) {
-                AsyncImage(
-                    model = item.images.first(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .width(72.dp)
-                        .height(72.dp)
-                        .clip(RoundedCornerShape(12.dp)),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f).padding(start = if (item.images.isNotEmpty()) 10.dp else 0.dp),
-            ) {
+        Row(verticalAlignment = Alignment.Top) {
+            ThreadThumb(item)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -77,7 +84,7 @@ fun ThreadCard(item: ThreadItem, onClick: () -> Unit) {
                 if (item.summary.isNotBlank()) {
                     Text(
                         text = item.summary,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -109,6 +116,57 @@ fun ThreadCard(item: ThreadItem, onClick: () -> Unit) {
     }
 }
 
+/**
+ * 固定尺寸缩略图。
+ *
+ * 没有图的时候不留空白、也不让标题跑到左边去——统一大小 + 中性底色，
+ * 这样带图帖和纯文字帖混在一起排，标题也是齐的。
+ */
+@Composable
+private fun ThreadThumb(item: ThreadItem) {
+    val size = 76.dp
+    val hasImage = item.images.isNotEmpty() && item.images.first().isNotBlank()
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (hasImage) {
+            AsyncImage(
+                model = item.images.first(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                Icons.Outlined.Article,
+                contentDescription = "文字帖",
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        if (item.images.size > 1) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    "图 ${item.images.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun ThreadList(
     items: List<ThreadItem>,
@@ -118,8 +176,9 @@ fun ThreadList(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier = modifier.fillMaxSize()) {
-        items(items, key = { "${it.threadId}-${it.title}" }) { item ->
+        itemsIndexed(items, key = { _, it -> "${it.threadId}-${it.title}" }) { index, item ->
             ThreadCard(item, onClick = { onOpen(item) })
+            if (index < items.lastIndex) MtDivider()
         }
         if (loading) {
             item {

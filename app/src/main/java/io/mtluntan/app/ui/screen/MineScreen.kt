@@ -62,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.domain.model.Account
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.util.CopyUtil
@@ -140,7 +141,7 @@ fun MineScreen(app: MTLuntanApp, nav: NavHostController) {
 
             // 签到
             item {
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+                MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.EmojiEvents, null, tint = MaterialTheme.colorScheme.primary)

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.domain.model.HistoryRecord
 import kotlinx.coroutines.launch
 
@@ -73,7 +74,7 @@ fun HistoryScreen(app: MTLuntanApp, nav: NavHostController) {
 
 @Composable
 private fun HistoryRow(record: HistoryRecord, onClick: () -> Unit, onDelete: () -> Unit) {
-    ElevatedCard(
+    MtCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
