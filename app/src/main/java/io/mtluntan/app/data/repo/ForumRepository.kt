@@ -171,11 +171,20 @@ class ForumRepository(private val net: Net) {
         noticeAuthor: String = "",
         notifyAuthor: Boolean = false,
     ): SubmitResult = withContext(Dispatchers.IO) {
-        val url = "${ApiUris.SITE}/forum.php?mod=post&action=reply&tid=$tid&fid=$fid&replysubmit=yes&mobile=2"
+        // 参数与 Java 参考版 AutoReplyEngine.sendUnlockReply 对齐：
+        // 带 extra / handlekey / loc / inajax，并且提交时带 Referer —— 少任何一项
+        // 站点都可能返回「抱歉，您的请求来路不正确或表单验证串不符」而不报错。
+        val url = "${ApiUris.SITE}/forum.php?mod=post&action=reply&fid=$fid&tid=$tid" +
+            "&extra=&replysubmit=yes&mobile=2&handlekey=fastpost&loc=1&inajax=1"
         val params = mutableMapOf(
-            "formhash" to formhash, "posttime" to "", "wysiwyg" to "0",
-            "message" to message, "usesig" to "1",
-            "reppid" to reppid.toString(), "repquote" to repquote.toString(),
+            "formhash" to formhash,
+            "message" to message,
+            "replysubmit" to "yes",
+            "posttime" to (System.currentTimeMillis() / 1000).toString(),
+            "wysiwyg" to "0",
+            "usesig" to "1",
+            "reppid" to reppid.toString(),
+            "repquote" to repquote.toString(),
         )
         if (noticeAuthor.isNotEmpty()) {
             params["noticeauthor"] = noticeAuthor
@@ -183,7 +192,8 @@ class ForumRepository(private val net: Net) {
             params["noticeauthormsg"] = ""
             if (notifyAuthor) params["notifyauthor"] = "1"
         }
-        val html = net.postForm(url, params, foreground = true)
+        val referer = ApiUris.viewThread(tid, 1)
+        val html = net.postForm(url, params, foreground = true, referer = referer)
         val result = EditorParser.parseSubmit(html, url)
         if (result.ok) LogCenter.ok(LogTag.RUN, "回复成功", "tid=$tid")
         else LogCenter.fail(LogTag.RUN, "回复失败", result.error)

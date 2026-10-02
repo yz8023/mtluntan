@@ -3,6 +3,7 @@ package io.mtluntan.app.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -110,8 +112,11 @@ fun ProfileScreen(app: MTLuntanApp, nav: NavHostController, uid: Long) {
         },
     ) { pad ->
         Column(modifier = Modifier.fillMaxSize().padding(pad)) {
-            if (loading && profile == null) { LoadingBox(); return@Column }
-            val p = profile ?: return@Column
+            // 同上：不使用提前 return，避免组结构失衡
+            val p = profile
+            if (p == null) {
+                if (loading) LoadingBox() else MessageBox("资料加载失败")
+            } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item {
                     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -227,6 +232,7 @@ fun ProfileScreen(app: MTLuntanApp, nav: NavHostController, uid: Long) {
                         modifier = Modifier.fillMaxWidth().padding(8.dp),
                     ) { Text("加载更多") }
                 }
+            }
             }
         }
     }
@@ -417,17 +423,32 @@ fun SearchScreen(app: MTLuntanApp, nav: NavHostController) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(enabled = !loading, onClick = { search(true) }) { Icon(Icons.Filled.Search, "搜索") }
             }
-            if (loading) { LoadingBox(); return@Column }
-            if (error.isNotEmpty() && results.isEmpty()) { MessageBox(error); return@Column }
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(results, key = { "search-${it.threadId}-${it.title.take(10)}" }) { item ->
-                    ThreadCard(item, onClick = { nav.navigate(Routes.thread(item.threadId)) })
-                }
-                item {
-                    TextButton(
-                        onClick = { page++; search(false) },
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    ) { Text("加载下一页") }
+            // ⚠️ 这里不能写 `if (…) { LoadingBox(); return@Column }`：
+            // 在 composable lambda 里提前 return 会让 Compose 的「组结构」失衡，
+            // 退组时把空栈弹爆 → IndexOutOfBoundsException: Index -1 out of bounds for length 0
+            // （就是「搜索直接闪退」的根因）。改成 when 分支后不可能再失衡。
+            when {
+                loading && results.isEmpty() -> LoadingBox()
+                error.isNotEmpty() && results.isEmpty() -> MessageBox(error)
+                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(results, key = { "search-${it.threadId}-${it.title.hashCode()}" }) { item ->
+                        ThreadCard(item, onClick = { nav.navigate(Routes.thread(item.threadId)) })
+                    }
+                    if (loading) {
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                            }
+                        }
+                    } else if (error.isNotEmpty()) {
+                        item { MessageBox(error) }
+                    }
+                    item {
+                        TextButton(
+                            onClick = { page++; search(false) },
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        ) { Text("加载下一页") }
+                    }
                 }
             }
         }

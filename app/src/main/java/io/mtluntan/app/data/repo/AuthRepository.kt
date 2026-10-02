@@ -16,7 +16,9 @@ import io.mtluntan.app.util.LogCenter
 import io.mtluntan.app.util.LogCenter.LogTag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -207,17 +209,54 @@ class AuthRepository(
         return if (uid > 0) "uid_$uid" else "account_${System.currentTimeMillis()}"
     }
 
-    /** 账号密码直接登录（隔离会话，不污染前台），成功后入库。 */
-    suspend fun loginWithPassword(username: String, password: String, keepPassword: Boolean): Pair<Boolean, String> =
-        withContext(Dispatchers.IO) {
-            importSession(
-                username = username,
-                uid = 0,
-                cookieString = cookieRepo.exportCookieString(username),
-                password = if (keepPassword) password else null,
-            )
-            true to "已保存账号"
+    /**
+     * 账号密码登录（隔离会话，不污染前台会话），成功后入库。
+     *
+     * 流程：临时会话 → 过站点人机校验（acw_sc__v2 / ESA）→ 拉登录页拿 formhash/loginhash
+     * → POST loginsubmit → **回个人页确认真实身份**（uid / 用户名 / 用户组 / 积分）→ 入库。
+     * 密码可以托管（KeyStore AES-GCM 加密），这样 Cookie 失效后能静默重登、也能自动签到。
+     */
+    suspend fun loginWithPassword(
+        username: String,
+        password: String,
+        keepPassword: Boolean,
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val user = username.trim()
+        if (user.isEmpty() || password.isEmpty()) return@withContext false to "请输入账号和密码"
+
+        val handle = PENDING_HANDLE
+        cookieRepo.clearForAccount(handle)
+        val client = IsolatedClient(cookieRepo, handle)
+        val login = try {
+            SessionGuard(cookieRepo).login(client, user, password)
+        } catch (t: Throwable) {
+            return@withContext false to ("登录请求失败：${t.message ?: "网络异常"}")
         }
+        if (!login.ok) return@withContext false to login.message.ifEmpty { "登录失败" }
+
+        // 用服务端返回的身份入库（拿不到就用用户输入的账号名，uid 未知但不会撞名）
+        val profile = runCatching {
+            io.mtluntan.app.MTLuntanApp.instanceOrNull()?.forum?.identityOf(IsolatedClient(cookieRepo, handle))
+        }.getOrNull()
+        val cookieString = cookieRepo.exportCookieString(handle)
+        if (cookieString.isBlank()) return@withContext false to "登录成功但没拿到会话，请重试"
+
+        val outcome = importStaged(
+            cookieString = cookieString,
+            username = profile?.username.orEmpty().ifBlank { user },
+            uid = profile?.uid ?: 0,
+            nickname = profile?.username.orEmpty().ifBlank { user },
+            avatar = profile?.avatarUrl.orEmpty(),
+            group = profile?.groupName.orEmpty(),
+            credits = profile?.creditsText.orEmpty(),
+            password = if (keepPassword) password else null,
+        )
+        cookieRepo.clearForAccount(handle)
+        when (outcome) {
+            is ImportOutcome.Ok -> true to (if (outcome.isNew) "已添加账号：${outcome.username}" else "已更新账号：${outcome.username}")
+            ImportOutcome.NeedName -> false to "登录成功但没识别到身份，请改用 Cookie 导入"
+        }
+    }
 
     // ---------------- 导入去重 ----------------
 
@@ -373,6 +412,38 @@ class AuthRepository(
         db.signRecordDao().clearForAccount(username)
         if (SessionHolder.activeAccount.value == username) activate(null)
         LogCenter.log(LogTag.RUN, "已删除账号 $username")
+    }
+
+    private val restoreGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private val restoreStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** 启动时调用：恢复上次账号，并在完成后放行所有「等账号就绪」的调用。 */
+    suspend fun restoreFromStorage() = withContext(Dispatchers.IO) {
+        if (!restoreStarted.compareAndSet(false, true)) {
+            restoreGate.await()
+            return@withContext
+        }
+        runCatching {
+            val saved = settings.activeAccount.first()
+            if (!saved.isNullOrEmpty()) activate(saved)
+        }
+        restoreGate.complete(Unit)
+    }
+
+    /**
+     * 等「活动账号」恢复完成。
+     *
+     * 用户反馈「消息页说我还需要登录，可我明明登录了」：根因是启动时账号是异步恢复的，
+     * 消息页抢在恢复完成前就判断了 `activeAccount == null` → 直接显示游客提示。
+     * 这里在读取账号前等一下（最多 3 秒），避免误判。
+     */
+    suspend fun awaitActiveAccount(timeoutMs: Long = 3000): String? {
+        if (!restoreStarted.get() || settings.activeAccount.first() != null) {
+            // 已经恢复过 / 已经有账号 → 不必等
+            return settings.activeAccount.first()
+        }
+        withTimeoutOrNull(timeoutMs) { restoreGate.await() }
+        return settings.activeAccount.first()
     }
 
     fun isSessionPresent(): Boolean = cookieRepo.exportCookieString(SessionHolder.activeAccount.value).isNotEmpty()

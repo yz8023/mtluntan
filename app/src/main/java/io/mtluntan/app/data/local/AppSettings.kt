@@ -138,7 +138,8 @@ class AppSettings(private val context: Context) {
     val aiDryRun: Flow<Boolean> = context.dataStore.data.map { it[KEY_AI_DRY_RUN] ?: false }
 
     val autoReply: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_REPLY] ?: false }
-    val autoReplyOnView: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_REPLY_ON_VIEW] ?: false }
+    /** 进帖自动解锁：默认**开**，只要用户打开这个开关就立刻生效（不再要求两个开关同时开）。 */
+    val autoReplyOnView: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_REPLY_ON_VIEW] ?: true }
     val autoReplyTemplate: Flow<String> = context.dataStore.data.map { it[KEY_AUTO_REPLY_TEMPLATE] ?: DEFAULT_UNLOCK_TEMPLATE }
     val autoReplyPrompt: Flow<String> = context.dataStore.data.map { it[KEY_AUTO_REPLY_PROMPT] ?: "" }
     val autoReplyDaily: Flow<Int> = context.dataStore.data.map { it[KEY_AUTO_REPLY_DAILY] ?: 10 }

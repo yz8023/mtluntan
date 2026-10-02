@@ -1,6 +1,7 @@
 package io.mtluntan.app.ui.screen
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -28,9 +29,13 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -100,6 +106,14 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
     var editUid by remember { mutableStateOf("") }
     var editAvatar by remember { mutableStateOf("") }
 
+    // 「添加账号」的三种方式：账号密码（推荐）/ 网页登录 / Cookie 导入
+    var addDialog by remember { mutableStateOf(false) }
+    var loginDialog by remember { mutableStateOf(false) }
+    var loginName by remember { mutableStateOf("") }
+    var loginPassword by remember { mutableStateOf("") }
+    var rememberPassword by remember { mutableStateOf(true) }
+    var loginBusy by remember { mutableStateOf(false) }
+
     LaunchedEffect(accounts) {
         hasPassword = accounts.filter { app.auth.hasPassword(it.username) }.map { it.username }.toSet()
     }
@@ -112,71 +126,59 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                     IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
-                    IconButton(onClick = { nav.navigate(Routes.LOGIN) }) { Icon(Icons.Filled.Add, "添加账号（网页登录）") }
-                    IconButton(onClick = { cookieDialog = true }) { Icon(Icons.Filled.Key, "用 Cookie 添加") }
+                    // 只保留顶栏这一个「添加」入口：点开选方式（原来页面上那两个白底按钮已移除）
+                    IconButton(onClick = { addDialog = true }) { Icon(Icons.Filled.Add, "添加账号") }
                 },
             )
         },
     ) { pad ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(pad)) {
             item {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 顶部小工具条：一键签到 / 签到记录 / 添加账号（都是紧凑 chip，不再是大白按钮）
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 4.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         AssistChip(
                             onClick = {
-                                if (accounts.isEmpty()) { nav.navigate(Routes.LOGIN); return@AssistChip }
+                                if (accounts.isEmpty()) { addDialog = true; return@AssistChip }
                                 busy = true
                                 scope.launch {
-                                    val summary = app.sign.signAll(notify = true)
+                                    // 先看今天签没签过，只签没签的（防重复，避免账号异常）
+                                    val summary = app.sign.autoSignOnOpen(force = true)
+                                        ?: app.sign.signAll(notify = true)
                                     message = summary.describe()
                                     busy = false
                                 }
                             },
-                            label = { Text(if (busy) "正在签到…" else "一键全部签到") },
+                            label = { Text(if (busy) "正在签到…" else "一键签到") },
                             leadingIcon = { Icon(Icons.Filled.Sync, null, modifier = Modifier.size(16.dp)) },
                         )
                         AssistChip(
                             onClick = { nav.navigate(Routes.SIGN_RECORDS) },
                             label = { Text("签到记录") },
                         )
+                        AssistChip(
+                            onClick = { addDialog = true },
+                            label = { Text("添加账号") },
+                            leadingIcon = { Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp)) },
+                        )
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "账号之间会间隔 ${spacing} 秒签到（可在设置里调整），避免论坛按 IP 限流返回 403。",
+                        "账号之间间隔 ${spacing} 秒签到（设置里可调）；同一账号当天已签到会自动跳过。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
                     if (message.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(4.dp))
                         Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MtButton(
-                            text = "添加账号",
-                            icon = Icons.Filled.Add,
-                            onClick = { nav.navigate(Routes.LOGIN) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        MtButton(
-                            text = "用 Cookie 添加",
-                            icon = Icons.Filled.Key,
-                            primary = false,
-                            onClick = { cookieDialog = true },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "打开添加页时会先清空网页里的旧会话，所以不会又进到上一个账号；\n" +
-                            "每个账号的 Cookie 独立保存，加新账号不会影响已有账号。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
             if (accounts.isEmpty()) {
-                item { MessageBox("还没有账号\n点右上角 + 用 WebView 登录导入会话") }
+                item { MessageBox("还没有账号\n点右上角 + 添加：账号密码登录 / 网页登录 / Cookie 导入") }
             }
             itemsIndexed(accounts, key = { _, it -> it.username }) { index, account ->
                 AccountCard(
@@ -347,6 +349,113 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
         )
     }
 
+    // ---------------- 添加账号：选方式 ----------------
+    if (addDialog) {
+        AlertDialog(
+            onDismissRequest = { addDialog = false },
+            title = { Text("添加账号") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AddMethodRow(
+                        title = "账号密码登录",
+                        subtitle = "推荐：直接在 App 里登录，可记住密码，掉线自动重登",
+                        icon = Icons.Filled.Person,
+                    ) {
+                        addDialog = false
+                        loginName = ""
+                        loginPassword = ""
+                        rememberPassword = true
+                        loginDialog = true
+                    }
+                    AddMethodRow(
+                        title = "网页登录",
+                        subtitle = "用内置网页登录一次，再回到 App 导入会话（支持扫码/人机校验）",
+                        icon = Icons.Filled.Language,
+                    ) {
+                        addDialog = false
+                        nav.navigate(Routes.LOGIN)
+                    }
+                    AddMethodRow(
+                        title = "Cookie 导入",
+                        subtitle = "已经在别处登录过：粘贴 Cookie 字符串直接导入",
+                        icon = Icons.Filled.Key,
+                    ) {
+                        addDialog = false
+                        cookieDialog = true
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { addDialog = false }) { Text("取消") } },
+        )
+    }
+
+    // ---------------- 账号密码登录 ----------------
+    if (loginDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!loginBusy) loginDialog = false },
+            title = { Text("账号密码登录") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = loginName,
+                        onValueChange = { loginName = it },
+                        label = { Text("用户名 / 邮箱") },
+                        singleLine = true,
+                        enabled = !loginBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = loginPassword,
+                        onValueChange = { loginPassword = it },
+                        label = { Text("密码") },
+                        singleLine = true,
+                        enabled = !loginBusy,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = rememberPassword, onCheckedChange = { rememberPassword = it })
+                        Text("记住密码（本机 KeyStore 加密保存）", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(
+                        "登录时会自动处理站点的 acw_sc__v2 人机校验；如果站点弹出图形验证码，请改用「网页登录」。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !loginBusy,
+                    onClick = {
+                        if (loginName.isBlank() || loginPassword.isEmpty()) {
+                            CopyUtil.toast(context, "请输入账号和密码")
+                            return@TextButton
+                        }
+                        loginBusy = true
+                        scope.launch {
+                            val (ok, msg) = app.auth.loginWithPassword(loginName, loginPassword, rememberPassword)
+                            loginBusy = false
+                            message = msg
+                            CopyUtil.toast(context, msg)
+                            if (ok) {
+                                loginDialog = false
+                                loginPassword = ""
+                                Refresh.bumpGeneration()
+                            }
+                        }
+                    },
+                ) { Text(if (loginBusy) "登录中…" else "登录并添加") }
+            },
+            dismissButton = {
+                TextButton(enabled = !loginBusy, onClick = { loginDialog = false }) { Text("取消") }
+            },
+        )
+    }
+
     passwordFor?.let { account ->
         AlertDialog(
             onDismissRequest = { passwordFor = null },
@@ -467,6 +576,33 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
             },
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } },
         )
+    }
+}
+
+/** 「添加账号」里的一行方式。 */
+@Composable
+private fun AddMethodRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(10.dp),
+    ) {
+        Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        }
+        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
     }
 }
 

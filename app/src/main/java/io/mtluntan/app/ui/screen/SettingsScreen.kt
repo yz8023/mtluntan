@@ -97,6 +97,8 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
     val toolbarStyle by app.settings.toolbarStyle.collectAsStateWithLifecycle(initialValue = "icon")
     val toolbarRows by app.settings.toolbarRows.collectAsStateWithLifecycle(initialValue = 2)
     val replyPreview by app.settings.replyPreview.collectAsStateWithLifecycle(initialValue = true)
+    val autoReplyOnView by app.settings.autoReplyOnView.collectAsStateWithLifecycle(initialValue = true)
+    val autoReplyDaily by app.settings.autoReplyDaily.collectAsStateWithLifecycle(initialValue = 10)
     var crashLog by remember { mutableStateOf("") }
     var showCrash by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { crashLog = io.mtluntan.app.util.CrashGuard.read(context) }
@@ -389,8 +391,8 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
             }
             item {
                 SettingSwitch(
-                    title = "评论自动下一页",
-                    subtitle = "一页没解析到回复时，自动把后面的页接上",
+                    title = "自动解锁后续页",
+                    subtitle = "一页没解析到回复时，继续往后找隐藏内容并解锁（不会把内容拼到当前页）",
                     checked = autoPagination,
                     onChange = { scope.launch { app.settings.setAutoPagination(it) } },
                 )
@@ -480,11 +482,20 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                 )
             }
 
-            item { GroupTitle("AI 与自动化") }
+            // ---------------- 自动回复解锁（独立分组，不再藏在 AI 里）----------------
+            item { GroupTitle("自动回复解锁") }
             item {
                 SettingSwitch(
-                    title = "自动回复 / 进帖解锁",
-                    subtitle = "隐藏内容自动回复可见；同一帖子 6 小时内只回一次",
+                    title = "进帖自动解锁（回复可见）",
+                    subtitle = "打开这个开关就生效：进帖发现隐藏内容就回一条，同一帖子 6 小时内只回一次",
+                    checked = autoReplyOnView,
+                    onChange = { v -> scope.launch { app.settings.setAutoReplyOnView(v) } },
+                )
+            }
+            item {
+                SettingSwitch(
+                    title = "后台自动回复",
+                    subtitle = "按间隔扫描新帖（不点进帖子也会回）；只影响后台扫描，不影响上面的进帖解锁",
                     checked = autoReply,
                     onChange = { v ->
                         scope.launch {
@@ -495,7 +506,19 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                     },
                 )
             }
-            item { EntryLine("AI 配置", "接口、Key、模型、提示词、模板") { nav.navigate(Routes.AI_CONFIG) } }
+            item {
+                SettingChoice(
+                    title = "每日解锁回复上限",
+                    subtitle = "防止回复过多被风控；达到上限后当天不再自动回复",
+                    options = listOf("3", "5", "10", "20", "50"),
+                    selected = autoReplyDaily.toString(),
+                    onSelect = { v -> v.toIntOrNull()?.let { n -> scope.launch { app.settings.setAutoReplyDaily(n) } } },
+                )
+            }
+            item { EntryLine("解锁回复内容", "固定模板 / AI 生成、额外要求") { nav.navigate(Routes.AI_CONFIG) } }
+
+            item { GroupTitle("AI") }
+            item { EntryLine("AI 配置", "接口、Key、模型、系统提示词") { nav.navigate(Routes.AI_CONFIG) } }
             item { EntryLine("AI 会话", "历史对话与帖子总结") { nav.navigate(Routes.AI_SESSIONS) } }
 
             item { GroupTitle("记录与调试") }

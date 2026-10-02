@@ -18,6 +18,7 @@ import io.mtluntan.app.worker.SignScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -89,12 +90,14 @@ class MTLuntanApp : android.app.Application() {
         }
     }
 
-    /** 启动时恢复上次使用的账号（cookie jar + 前台会话）。 */
+    /** 启动时恢复上次使用的账号（cookie jar + 前台会话），并做一次「今日未签才签」的自动签到。 */
     private fun restoreActiveAccount() {
         appScope.launch {
+            runCatching { auth.restoreFromStorage() }
+            // 打开 App：先看今天签没签过，没签的账号才去签（已签的直接跳过，避免重复触发风控）
             runCatching {
-                val saved = settings.activeAccount.first()
-                if (!saved.isNullOrEmpty()) auth.activate(saved)
+                delay(1500)
+                sign.autoSignOnOpen()
             }
         }
     }

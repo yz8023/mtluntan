@@ -155,11 +155,18 @@ object UserPagesParser : BaseParser() {
      * 这类字符串每个账号都一样，一旦入库就会互相覆盖，所以这里必须挡掉。
      */
     fun sanitizeUsername(raw: String): String {
-        val name = raw.trim().replace(Regex("\\s+"), " ")
-        if (name.isEmpty() || name.length > 24) return ""
+        var name = raw.trim().replace(Regex("\\s+"), " ")
+        if (name.isEmpty()) return ""
+        // 站点有些页面会把名字和说明拼在一起（「xxx 的个人资料」「xxx的空间」）→ 只留名字
+        name = name.substringBefore(" 的 ").substringBefore("的个人资料").substringBefore("的空间")
+            .substringBefore("的资料").substringBefore("的空间首页").substringBefore(" - ")
+            .substringBefore("｜").substringBefore("|").trim()
+        // 「欢迎您回来，xxx」这类登录提示
+        Regex("欢迎(?:您)?回来[，,]\\s*([^，,。\\s]+)").find(name)?.let { name = it.groupValues[1] }
+        if (name.length > 24) return ""
         val junk = listOf(
             "论坛", "Powered", "powered", "登录", "注册", "提示", "个人资料", "搜索结果",
-            "空间", "首页", "Discuz", "discuz", "错误", "无权", "该用户", "无效",
+            "空间", "首页", "Discuz", "discuz", "错误", "无权", "该用户", "无效", "用户组",
         )
         if (junk.any { name.contains(it) }) return ""
         if (!name.any { it.isLetter() || it.isDigit() }) return ""

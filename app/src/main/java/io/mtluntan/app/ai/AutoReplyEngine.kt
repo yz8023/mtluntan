@@ -46,10 +46,9 @@ class AutoReplyEngine(private val app: MTLuntanApp) {
         detail: ThreadDetail,
         pageHtml: String,
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (!app.settings.autoReply.first()) {
-            LogCenter.skip("自动回复开关关闭", "tid=$tid")
-            return@withContext Result.failure(IllegalStateException("自动回复未开启"))
-        }
+        // 只看「进帖自动解锁」这一个开关。
+        // 以前要求「自动回复」+「进帖解锁」两个都为真才动手 —— 太严了，
+        // 用户只打开其中一个时会完全没有反应（Java 版也踩过同一个坑并已修正）。
         if (!app.settings.autoReplyOnView.first()) {
             LogCenter.skip("进帖解锁开关关闭", "tid=$tid")
             return@withContext Result.failure(IllegalStateException("进帖解锁未开启"))
@@ -86,7 +85,7 @@ class AutoReplyEngine(private val app: MTLuntanApp) {
         val template = app.settings.autoReplyTemplate.first()
         val useAi = app.settings.autoReplyAi.first()
         val extraPrompt = app.settings.autoReplyPrompt.first()
-        val text = if (useAi) {
+        val text = if (useAi && app.settings.aiApiKey.first().isNotBlank()) {
             val context = buildString {
                 appendLine(detail.title)
                 detail.mainPost?.let { appendLine(it.contentBbc.take(600)) }
@@ -106,12 +105,18 @@ class AutoReplyEngine(private val app: MTLuntanApp) {
             return@withContext Result.success("演练：$text")
         }
 
-        val fid = detail.fid
+        var fid = detail.fid
+        if (fid <= 0) fid = ThreadExtrasParser.fidOf(pageHtml)
+        if (fid <= 0) {
+            release(tid)
+            LogCenter.skip("拿不到 fid，无法回复", "tid=$tid")
+            return@withContext Result.failure(IllegalStateException("拿不到 fid"))
+        }
         val result = app.forum.submitReply(
             tid = tid,
             formhash = formhash,
             message = text,
-            fid = if (fid > 0) fid else 2,
+            fid = fid,
             reppid = detail.mainPost?.pid ?: 0,
             repquote = 0,
         )

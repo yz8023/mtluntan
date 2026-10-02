@@ -106,6 +106,7 @@ class Net(context: Context) {
         params: Map<String, String>,
         ajax: Boolean = true,
         foreground: Boolean = false,
+        referer: String = "",
     ): String =
         withContext(Dispatchers.IO) {
             RequestThrottle.acquire(foreground)
@@ -114,6 +115,8 @@ class Net(context: Context) {
             val builder = Request.Builder().url(url).post(form.build())
             defaultHeaders().forEach { (k, v) -> builder.header(k, v) }
             if (ajax) builder.header("X-Requested-With", "XMLHttpRequest")
+            // Discuz 的回复/发帖接口会校验来源页，缺 Referer 会被当成机器人直接拒掉
+            if (referer.isNotEmpty()) builder.header("Referer", referer)
             client.newCall(builder.build()).execute().use { processBody(it) }
         }
 

@@ -1,5 +1,6 @@
 package io.mtluntan.app.ui.screen
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
@@ -15,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -87,6 +90,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,6 +109,7 @@ import io.mtluntan.app.domain.model.Post
 import io.mtluntan.app.domain.model.ThreadDetail
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.util.CopyUtil
+import io.mtluntan.app.ui.motion.pressScale
 import io.mtluntan.app.util.LogCenter
 import io.mtluntan.app.util.LogCenter.LogTag
 import io.mtluntan.app.util.PerfLog
@@ -120,7 +125,7 @@ import kotlinx.coroutines.launch
  *  - 「复制」有多档：整楼纯文本 / 整楼 BBCode / 只复制代码 / 带楼层署名
  *  - 自己的楼层才显示编辑与删除；删除走整张表单回提（不猜参数）
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -150,16 +155,12 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
         quickPhrases.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
     }
     var galleryUrls by remember { mutableStateOf<List<String>?>(null) }
-    var galleryIndex by remember { mutableIntStateOf(0) }
+    var galleryStartUrl by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var pendingAttachment by remember { mutableStateOf<io.mtluntan.app.domain.model.Attachment?>(null) }
     var downloading by remember { mutableStateOf("") }
     var offlineMode by remember { mutableStateOf(false) }
-    // 自动翻页累积的后续页楼层（detail 只保留「当前这一页」的解析结果）
-    val extraPosts = remember { mutableStateListOf<Post>() }
-    var autoFetching by remember { mutableStateOf(0) }
-    val autoPagination by app.settings.autoPagination.collectAsStateWithLifecycle(initialValue = true)
     val toolbarStyle by app.settings.toolbarStyle.collectAsStateWithLifecycle(initialValue = "icon")
     val toolbarRows by app.settings.toolbarRows.collectAsStateWithLifecycle(initialValue = 2)
     val replyPreview by app.settings.replyPreview.collectAsStateWithLifecycle(initialValue = true)
@@ -175,7 +176,6 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
             pageHtml = html
             val parsed = io.mtluntan.app.data.parser.ThreadDetailParser.parse(html, targetPage)
             detail = parsed
-            if (targetPage <= 1) extraPosts.clear()
             if (parsed.loginRequired) {
                 error = "需要先登录才能查看这个帖子"
             } else if (parsed.errorMessage.isNotEmpty()) {
@@ -184,16 +184,8 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 error = ""
                 app.local.recordVisit(tid, parsed.title, parsed.forumName, parsed.mainPost?.authorName ?: "", targetPage, parsed.totalPages)
                 app.local.markRead(tid)
-                // 本页一条回复都没解析到、但后面还有页 → 自动把评论接上（用户反馈：评论区要自动下一页）
-                if (autoPagination && parsed.posts.isEmpty() &&
-                    parsed.currentPage < parsed.totalPages && autoFetching < 6
-                ) {
-                    autoFetching++
-                    load(targetPage + 1, keepScroll = true)
-                    autoFetching--
-                } else if (targetPage > 1) {
-                    extraPosts.addAll(parsed.posts.filter { p -> extraPosts.none { it.pid == p.pid } })
-                }
+                // 评论按「页」翻：翻到第几页就只显示这一页，绝不把下一页拼到当前页
+                // （用户反馈：拼在一起之后就回不到上一页了，所以保持整页切换）
                 favorited = app.local.isFavorite(tid)
                 likedPids.clear(); likedPids.addAll(if (parsed.likedByCurrent) listOf(parsed.mainPost?.pid ?: 0L) else emptyList())
                 editablePids.clear(); editablePids.addAll(ThreadExtrasParser.editablePids(html))
@@ -275,27 +267,6 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                         hit.floor,
                         detail?.totalPages ?: 1,
                     )
-                }
-            }
-    }
-
-    // 评论区滑到底自动加载下一页并**直接拼接**在下面（不跳页、不换屏）
-    var autoNexting by remember { mutableStateOf(false) }
-    LaunchedEffect(listState, detail?.currentPage, detail?.totalPages, autoPagination) {
-        if (!autoPagination) return@LaunchedEffect
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
-            .distinctUntilChanged()
-            .collect { lastVisible ->
-                val d = detail ?: return@collect
-                val total = listState.layoutInfo.totalItemsCount
-                if (!loading && !autoNexting && d.currentPage < d.totalPages &&
-                    total > 0 && lastVisible >= total - 2
-                ) {
-                    autoNexting = true
-                    val next = d.currentPage + 1
-                    page = next
-                    load(next, keepScroll = true)
-                    autoNexting = false
                 }
             }
     }
@@ -467,8 +438,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 }
                 current == null -> MessageBox("加载失败")
                 else -> {
-                    val posts = (listOfNotNull(current.mainPost) + current.posts + extraPosts)
-                        .distinctBy { it.pid }
+                    val posts = (listOfNotNull(current.mainPost) + current.posts).distinctBy { it.pid }
                         .let { list -> if (hideBlacklist) list else list }
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         if (offlineMode) {
@@ -551,6 +521,20 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 }
                             }
                         }
+                        if (!offlineMode && current.posts.isNotEmpty() && current.totalPages > 1) {
+                            // 吸顶翻页条：翻页后列表会回到顶部，底部那条看不见 → 这条一直贴在顶部，
+                            // 用户随时能「上一页」，不会再出现「翻过去就回不来」的体感。
+                            stickyHeader(key = "pager-top") {
+                                Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+                                    CommentPagerRow(
+                                        page = current.currentPage,
+                                        total = current.totalPages,
+                                        onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
+                                        onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                    )
+                                }
+                            }
+                        }
                         itemsIndexed(posts, key = { index, post -> if (post.pid > 0) "p${post.pid}" else "i$index" }) { index, post ->
                             if (hideBlacklist && post.uid > 0 && blacklistUids.contains(post.uid)) {
                                 RevealItem(index) {
@@ -569,7 +553,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 liked = likedPids.contains(post.pid),
                                 hiddenLocked = ThreadExtrasParser.hiddenBlocks(pageHtml).any { it.locked && (it.pid == 0L || it.pid == post.pid) },
                                 onOpenProfile = { uid -> if (post.uid > 0) nav.navigate(Routes.profile(post.uid)) },
-                                onImageClick = { urls, index -> galleryUrls = urls; galleryIndex = index },
+                                onImageClick = { urls, url -> galleryUrls = urls; galleryStartUrl = url },
                                 onUnlock = {
                                     scope.launch {
                                         app.autoReply.unlockSingleThread(tid).onSuccess {
@@ -597,8 +581,18 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                             )
                             }
                             }
-                            // 楼层之间用细线隔开：用户反馈「分不清哪条是哪条」
-                            if (index < posts.lastIndex) MtDivider(startIndent = 14.dp)
+                            // 楼层之间不再画分隔线：评论改成气泡后靠层次区分（用户不喜欢竖条/横线）
+                        }
+                        if (!offlineMode && current.posts.isNotEmpty() && current.totalPages > 1) {
+                            // 页尾再放一条：读完这页顺手翻页
+                            item(key = "pager-bottom") {
+                                CommentPagerRow(
+                                    page = current.currentPage,
+                                    total = current.totalPages,
+                                    onPrev = { if (page > 1) { page--; scope.launch { load(page) } } },
+                                    onNext = { if (page < current.totalPages) { page++; scope.launch { load(page) } } },
+                                )
+                            }
                         }
                         if (posts.size > 1 && !offlineMode) {
                             item {
@@ -784,19 +778,18 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     }
 
     galleryUrls?.let { urls ->
-        ImageGallery(urls, galleryIndex) { galleryUrls = null }
+        ImageGallery(urls, galleryStartUrl) { galleryUrls = null }
     }
 }
 
 /**
  * 单个楼层。
  *
- * 用户反馈「评论区间隔太大、每条评论没有清晰标记、分不清哪条是哪条」——
- * 所以这里：
- *  - 左侧一条**楼层色条**（楼主=主色 / 回复=次要色），一条评论从哪到哪一眼可见；
- *  - 头部一个**楼层徽标**（`#12 楼`），配合作者、时间、等级；
- *  - 引用回复单独一行「回复 @xxx」，能看出这是回给谁的；
- *  - 行内边距收紧（12→10）、动作行改成小胶囊按钮，卡与卡之间只留 3dp。
+ * 视觉规则（用户反馈「正文跟评论区一个样、分不清」）：
+ *  - **楼主（正文）**：整宽卡片 + 顶部渐变头带 + 「楼主」「正文」标记，一眼看出是主帖；
+ *  - **回复（评论）**：右侧缩进的**半透明气泡**（glass 表面 + 按压缩放反馈），
+ *    多条评论就是一连串气泡，跟正文完全不同层；
+ *  - 不再用「左侧一条色条」——区分靠层次和间距，不靠竖线。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -807,142 +800,230 @@ fun PostCard(
     liked: Boolean = false,
     hiddenLocked: Boolean = false,
     onOpenProfile: ((Long) -> Unit)? = null,
-    onImageClick: ((List<String>, Int) -> Unit)? = null,
+    onImageClick: ((List<String>, String) -> Unit)? = null,
     onUnlock: (() -> Unit)? = null,
     onLike: (() -> Unit)? = null,
     onReply: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
 ) {
-    val accent = if (post.isMainPost) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            // 楼层色条：每条评论的边界
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .background(accent.copy(alpha = if (post.isMainPost) 0.85f else 0.45f)),
-            )
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = post.avatarUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .clickable(enabled = post.uid > 0) { onOpenProfile?.invoke(post.uid) },
-                    )
-                    Column(modifier = Modifier.padding(start = 8.dp).weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                post.authorName.ifEmpty { "匿名" },
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1f, fill = false)
-                                    .clickable(enabled = post.uid > 0) { onOpenProfile?.invoke(post.uid) },
+    val floorInfo = buildString {
+        if (post.postTime.isNotBlank()) append(post.postTime)
+        if (post.floor > 0) { if (isNotEmpty()) append(" · "); append("${post.floor} 楼") }
+    }
+    if (post.isMainPost) {
+        // ---------------- 主楼（正文） ----------------
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            MtCard(glass = true, padding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                // 头带：主题色渐变 + 「楼主」「正文」标记
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                                )
                             )
-                            if (post.isMainPost) {
-                                Spacer(Modifier.width(5.dp))
-                                TagChip("楼主", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                            if (post.authorTitle.isNotBlank()) {
-                                Spacer(Modifier.width(5.dp))
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = post.avatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = post.uid > 0) { onOpenProfile?.invoke(post.uid) },
+                        )
+                        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    post.authorTitle,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline,
+                                    post.authorName.ifEmpty { "匿名" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .clickable(enabled = post.uid > 0) { onOpenProfile?.invoke(post.uid) },
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                TagChip("楼主", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary)
+                            }
+                            Text(
+                                buildString {
+                                    if (post.authorTitle.isNotBlank()) append(post.authorTitle).append(" · ")
+                                    append(floorInfo)
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                                maxLines = 1,
+                            )
+                        }
+                        IconButton(onClick = { onMore?.invoke() }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Filled.MoreVert, "更多", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+                Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "正文",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        if (post.editedBy.isNotBlank()) {
+                            Spacer(Modifier.width(6.dp))
+                            Text("已编辑", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                        if (hiddenLocked) {
+                            Spacer(Modifier.width(6.dp))
+                            Text("隐藏未解锁", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    BbcContent(
+                        bbc = post.contentBbc,
+                        contentHtml = post.contentHtml,
+                        onImageClick = onImageClick,
+                        onUnlockClick = onUnlock,
+                    )
+                    if (post.signText.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            post.signText.trim(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    PostActionRow(
+                        liked = liked,
+                        editable = editable,
+                        deletable = deletable,
+                        onLike = onLike,
+                        onReply = onReply,
+                        onMore = onMore,
+                    )
+                }
+            }
+        }
+    } else {
+        // ---------------- 回复（评论气泡） ----------------
+        Box(modifier = Modifier.fillMaxWidth().padding(start = 22.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)) {
+            MtCard(
+                glass = true,
+                shape = RoundedCornerShape(topStart = 6.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
+                padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                onClick = { onMore?.invoke() },
+            ) {
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 5.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = post.avatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = post.uid > 0) { onOpenProfile?.invoke(post.uid) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    post.authorName.ifEmpty { "匿名" },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (post.floor > 0) {
-                                TagChip("#${post.floor} 楼", accent.copy(alpha = 0.16f), MaterialTheme.colorScheme.onSurface)
-                                Spacer(Modifier.width(5.dp))
+                                if (post.authorTitle.isNotBlank()) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        post.authorTitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                             Text(
-                                post.postTime.ifBlank { "" },
+                                floorInfo,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline,
                                 maxLines = 1,
                             )
-                            if (post.editedBy.isNotBlank()) {
-                                Spacer(Modifier.width(5.dp))
-                                Text(
-                                    "已编辑",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline,
-                                )
-                            }
+                        }
+                        if (post.floor > 0) {
+                            TagChip(
+                                "#${post.floor}",
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f),
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    if (hiddenLocked) {
-                        Text("隐藏未解锁", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    if (post.replyQuote.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "回复：${post.replyQuote.trim().take(60)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                    IconButton(onClick = { onMore?.invoke() }, modifier = Modifier.size(30.dp)) {
-                        Icon(Icons.Filled.MoreVert, "更多", modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                // 回复谁：引用行，独立出来更容易分辨
-                if (post.replyQuote.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "回复：${post.replyQuote.trim().take(60)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-                BbcContent(
-                    bbc = post.contentBbc,
-                    contentHtml = post.contentHtml,
-                    onImageClick = onImageClick,
-                    onUnlockClick = onUnlock,
-                )
-
-                if (post.signText.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        post.signText.trim(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    BbcContent(
+                        bbc = post.contentBbc,
+                        contentHtml = post.contentHtml,
+                        onImageClick = onImageClick,
+                        onUnlockClick = onUnlock,
                     )
-                }
-
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    CompactAction(
-                        label = "支持",
-                        icon = if (liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
-                        active = liked,
-                        onClick = { onLike?.invoke() },
+                    PostActionRow(
+                        liked = liked,
+                        editable = editable,
+                        deletable = deletable,
+                        onLike = onLike,
+                        onReply = onReply,
+                        onMore = onMore,
+                        compact = true,
                     )
-                    CompactAction(label = "回复", icon = Icons.Filled.ContentCopy, active = false, onClick = { onReply?.invoke() }, iconOnly = true)
-                    CompactAction(label = "更多", icon = Icons.Filled.MoreVert, active = false, onClick = { onMore?.invoke() }, iconOnly = true)
-                    Box(Modifier.weight(1f))
-                    if (deletable) Icon(Icons.Filled.DeleteOutline, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
-                    if (editable) Icon(Icons.Filled.Edit, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
                 }
             }
         }
     }
 }
 
-/** 小圆角标签（楼层 / 楼主 / 状态）。 */
+/** 楼层动作行：小胶囊，带按压缩放反馈。 */
+@Composable
+private fun PostActionRow(
+    liked: Boolean,
+    editable: Boolean,
+    deletable: Boolean,
+    onLike: (() -> Unit)?,
+    onReply: (() -> Unit)?,
+    onMore: (() -> Unit)?,
+    compact: Boolean = false,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        CompactAction("支持", if (liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp, liked) { onLike?.invoke() }
+        CompactAction("回复", Icons.AutoMirrored.Filled.Reply, false) { onReply?.invoke() }
+        if (!compact) CompactAction("更多", Icons.Filled.MoreVert, false) { onMore?.invoke() }
+        Box(Modifier.weight(1f))
+        if (deletable) Icon(Icons.Filled.DeleteOutline, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
+        if (editable) Icon(Icons.Filled.Edit, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
+    }
+}
+
+/** 小圆角标签（楼主 / 楼层 / 状态）。 */
 @Composable
 private fun TagChip(text: String, background: Color, content: Color) {
     Text(
@@ -952,25 +1033,26 @@ private fun TagChip(text: String, background: Color, content: Color) {
         maxLines = 1,
         modifier = Modifier
             .background(background, RoundedCornerShape(4.dp))
-            .padding(horizontal = 4.dp, vertical = 1.dp),
+            .padding(horizontal = 5.dp, vertical = 1.dp),
     )
 }
 
-/** 楼层动作：小胶囊，比 TextButton 矮一半，评论区不再被撑开。 */
+/** 楼层动作：小胶囊 + 按压反馈，比 TextButton 矮一半，评论区不再被撑开。 */
 @Composable
 private fun CompactAction(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     active: Boolean,
     onClick: () -> Unit,
-    iconOnly: Boolean = false,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .pressScale(interaction, pressedScale = 0.92f)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
         Icon(
             imageVector = icon,
@@ -978,14 +1060,12 @@ private fun CompactAction(
             modifier = Modifier.size(15.dp),
             tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
         )
-        if (!iconOnly) {
-            Spacer(Modifier.width(4.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-            )
-        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
@@ -1256,6 +1336,31 @@ private fun ReplySheet(
  * 列表底部页脚：页码 + 上一页 / 下一页。
  * 代替原来贴在输入框上方的那一条（用户反馈不需要那条）。
  */
+/** 评论区翻页条（顶部/底部各一条，纯整页切换，不做拼接）。 */
+@Composable
+private fun CommentPagerRow(page: Int, total: Int, onPrev: () -> Unit, onNext: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        ) {
+            TextButton(onClick = onPrev, enabled = page > 1) { Text("上一页") }
+            Text(
+                "评论区 第 $page / $total 页",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+            TextButton(onClick = onNext, enabled = page < total) { Text("下一页") }
+        }
+    }
+}
+
 @Composable
 private fun PageFooter(
     current: Int,
@@ -1270,7 +1375,7 @@ private fun PageFooter(
     ) {
         TextButton(onClick = onPrev, enabled = current > 1) { Text("上一页") }
         Text(
-            "第 $current / $total 页",
+            "第 $current / $total 页（整页切换，不会拼接）",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp),

@@ -363,30 +363,19 @@ fun AiConfigScreen(app: MTLuntanApp, nav: NavHostController) {
             }
 
             Spacer(Modifier.height(12.dp))
-            Text("自动回复 / 自动解锁", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
-                Switch(checked = autoReply, onCheckedChange = {
-                    scope.launch { app.settings.setAutoReply(it) }
-                })
-                Spacer(Modifier.width(10.dp))
-                Text("启用自动回复总开关", style = MaterialTheme.typography.bodyMedium)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
-                Switch(checked = autoReplyOnView, onCheckedChange = {
-                    scope.launch { app.settings.setAutoReplyOnView(it) }
-                })
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("进帖自动解锁（回复可见）", style = MaterialTheme.typography.bodyMedium)
-                    Text("同一帖子 6 小时内只回一次，失败也不立即重发", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                }
-            }
+            Text("解锁回复的内容", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp))
+            Text(
+                "开关不在这里：请到「设置 → 自动回复解锁」。这里只调回复内容与频率。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+            )
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
                 Switch(checked = autoReplyAi, onCheckedChange = { scope.launch { app.settings.setAutoReplyAi(it) } })
                 Spacer(Modifier.width(10.dp))
                 Column {
-                    Text("用 AI 生成回复内容", style = MaterialTheme.typography.bodyMedium)
-                    Text("关掉就用下面的固定模板", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text("用 AI 生成回复内容（可选）", style = MaterialTheme.typography.bodyMedium)
+                    Text("关掉就用下面的固定模板 —— 不配 AI Key 也能解锁", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
             ConfigField("回复模板", templateInput, { templateInput = it }, "感谢分享，正好需要", lines = 2)

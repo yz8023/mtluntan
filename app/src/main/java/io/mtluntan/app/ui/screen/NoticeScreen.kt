@@ -85,8 +85,10 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
 
     suspend fun load() {
         loading = true
+        // 启动时账号是异步恢复的：先等它回来，避免「明明登录了却提示需要登录」
+        val ready = app.auth.awaitActiveAccount()
         // 委托属性不能智能转换；顺便保证「这一轮加载」用的是同一个账号
-        val account = activeAccount
+        val account = activeAccount ?: ready
         // 先清空：切号后如果这一秒还在等网络，界面不能继续显示上一个账号的消息
         notices = emptyList()
         pms = emptyList()

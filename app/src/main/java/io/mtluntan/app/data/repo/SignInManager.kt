@@ -94,6 +94,7 @@ class SignInManager(
         val pageState = SignParser.parsePage(html)
         if (pageState.alreadySigned) {
             LogCenter.ok(LogTag.SIGN, "$account 今日已签到", pageState.reward.ifBlank { pageState.message })
+            // recordSign 会把 lastSignedAt 更新为现在 → 今天不会再签第二次
             return@withContext pageState.copy(ok = true, message = "今日已签到").also { auth.recordSign(account, it) }
         }
 
@@ -168,6 +169,70 @@ class SignInManager(
         }
     }
 
+    /**
+     * 「打开 App / 进我的页」时的自动签到：**真正的防重复**。
+     *
+     * 三重判断，任何一重命中就直接跳过，绝不提交第二次：
+     *   1. 本地签到记录里今天已经成功过（sign_records）；
+     *   2. 账号自己的 lastSignedAt 就是今天；
+     *   3. 签到页面上写着「今日已签」（signOne 第 ③ 步，页面为准）。
+     *
+     * 同一个进程里还有 10 分钟节流，避免频繁切换页面时反复请求（风控风险）。
+     */
+    suspend fun autoSignOnOpen(force: Boolean = false): Summary? = withContext(Dispatchers.IO) {
+        if (!settings.snapshotAutoSign()) return@withContext null
+        val now = System.currentTimeMillis()
+        if (!force && now - lastAutoRun < AUTO_RUN_INTERVAL_MS) {
+            LogCenter.skip("自动签到节流", "距上次不足 ${AUTO_RUN_INTERVAL_MS / 60000} 分钟")
+            return@withContext null
+        }
+        lastAutoRun = now
+
+        val accounts = db.accountDao().enabledAccounts()
+        if (accounts.isEmpty()) return@withContext Summary(0, 0, 0, emptyList())
+
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val pending = accounts.filter { acc ->
+            val recorded = db.signRecordDao().todayForAccount(acc.username, today)?.ok == true
+            val stamped = acc.lastSignedAt > 0 &&
+                SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(acc.lastSignedAt)) == today
+            if (recorded || stamped) {
+                LogCenter.skip("自动签到跳过", "${acc.username} 今日已签到")
+                false
+            } else true
+        }
+        if (pending.isEmpty()) {
+            LogCenter.log(LogTag.SIGN, "自动签到跳过", "全部账号今日已签到")
+            return@withContext Summary(accounts.size, 0, accounts.size, emptyList())
+        }
+
+        val spacingMs = settings.snapshotSpacing() * 1000L
+        var ok = 0
+        var already = 0
+        val failed = mutableListOf<Pair<String, String>>()
+        pending.forEachIndexed { index, entity ->
+            if (index > 0 && spacingMs > 0) delay(spacingMs)
+            val outcome = signOne(entity)
+            when {
+                outcome.alreadySigned -> already++
+                outcome.ok -> ok++
+                else -> failed += entity.username to outcome.message.ifEmpty { "失败" }
+            }
+        }
+        val summary = Summary(pending.size, ok, already, failed)
+        settings.setLastSignRun(System.currentTimeMillis(), summary.describe())
+        LogCenter.log(LogTag.SIGN, "打开 App 自动签到", summary.detailLines(), ok = failed.isEmpty())
+        if (settings.snapshotNotify() && (ok > 0 || failed.isNotEmpty())) {
+            Notifier.notify(
+                context = appContext,
+                title = if (failed.isEmpty()) "自动签到完成" else "自动签到有失败",
+                content = summary.describe(),
+                bigText = summary.detailLines(),
+            )
+        }
+        summary
+    }
+
     /** 一键全部签到（只跑 enabled 的账号）。 */
     suspend fun signAll(notify: Boolean = true): Summary = withContext(Dispatchers.IO) {
         val accounts = db.accountDao().enabledAccounts()
@@ -206,6 +271,14 @@ class SignInManager(
         val name = auth.activeAccountName() ?: return@withContext null
         val entity = db.accountDao().byUsername(name) ?: return@withContext null
         signOne(entity)
+    }
+
+    companion object {
+        /** 同一进程内自动签到的最小间隔，防止页面来回切时反复请求。 */
+        private const val AUTO_RUN_INTERVAL_MS = 10 * 60 * 1000L
+
+        @Volatile
+        private var lastAutoRun = 0L
     }
 
     suspend fun todayRecord(account: String): Boolean = withContext(Dispatchers.IO) {

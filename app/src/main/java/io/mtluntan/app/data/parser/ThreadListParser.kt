@@ -66,11 +66,13 @@ object ThreadListParser : BaseParser() {
             if (statLis.size > 0) likes = TextUtil.intOf(statLis[0].text())
             if (statLis.size > 1) replies = TextUtil.intOf(statLis[1].text())
             if (statLis.size > 2) views = TextUtil.intOf(statLis[2].text())
-            val imgs = li.select(".comiis_pyqlist_imgs img, .comiis_pyqlist_imgs li img, .mmlist_li_box img")
-                .map { firstNonEmptyAttr(it, "comiis_loadimages", "data-original", "data-src", "data-file", "file", "src") }
-                .filter { it.isNotEmpty() }
-                .map { abs(it) }
-                .take(9)
+            // 缩略图：帖子配图（含懒加载属性）；表情/占位图过滤掉
+            val imgs = BbcBlocks.contentImages(
+                li.select(".comiis_pyqlist_imgs img, .comiis_pyqlist_imgs li img, .mmlist_li_box img, .list_body img")
+                    .map { firstNonEmptyAttr(it, "comiis_loadimages", "data-original", "data-src", "data-file", "file", "src") }
+                    .filter { it.isNotEmpty() }
+                    .map { abs(it) }
+            ).take(9)
             val summaryEl = li.select(".list_body .f_b").firstOrNull()
             val hidden = summaryEl?.text()?.contains("本内容被作者隐藏") == true
             val timeEl = li.select(".forumlist_li_time .f_d, .forumlist_li_time").firstOrNull()

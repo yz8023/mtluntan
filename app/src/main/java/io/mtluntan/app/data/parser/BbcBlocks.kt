@@ -171,7 +171,44 @@ object BbcBlocks {
             val u = it.groupValues[1].trim()
             if (u.isNotEmpty()) out += absUrl(u)
         }
-        return out
+        // 表情不是「正文配图」：列表缩略图和图廊都不该收
+        return contentImages(out)
+    }
+
+    /**
+     * 论坛自带表情（smiley）的地址特征。
+     *
+     * 用户反馈「表情包被当成图片，点开还打开了错误的图」——Discuz 的表情是
+     * `static/image/smiley/...` 下面的小图，跟正文配图混在同一个 [img]/<img> 里。
+     * 这里统一识别，渲染时当行内表情、不进图廊、不参与「点开大图」。
+     */
+    private val SMILEY_HINTS = listOf(
+        "static/image/smiley", "/smiley/", "smiley/", "images/smiley",
+        "/face/", "editor/face", "static/image/face",
+    )
+
+    /** 占位 / 图标的文件名：既不是表情也不是配图，直接忽略。 */
+    private val PLACEHOLDER_FILE = Regex("^(none|lazy|loading|blank|spacer|grey|trans)[._-]?[a-z0-9]*\\.(gif|png|jpg|jpeg)$", RegexOption.IGNORE_CASE)
+
+    /** 这条地址是不是论坛自带表情。 */
+    fun isSmiley(url: String): Boolean {
+        val u = url.lowercase()
+        if (PLACEHOLDER_FILE.matches(u.substringAfterLast('/'))) return false
+        if (SMILEY_HINTS.any { u.contains(it) }) return true
+        // 纯文件名的表情（sad.gif / biggrin.png 之类），且不是附件/相册链接
+        val name = u.substringAfterLast('/')
+        return SMILEY_FILE.matches(name) && !u.contains("/forum.php") && !u.contains("/attachment")
+    }
+
+    private val SMILEY_FILE = Regex("^[a-z0-9_!]{2,20}\\.(gif|png|jpg|jpeg)$", RegexOption.IGNORE_CASE)
+
+    /** 正文配图：过滤掉表情、头像、站点图标、data: 占位图。 */
+    fun contentImages(urls: List<String>): List<String> = urls.filter { u ->
+        u.isNotBlank() &&
+            !u.startsWith("data:") &&
+            !isSmiley(u) &&
+            !u.contains("avatar.php") &&
+            !u.contains("/uc_server/")
     }
 
     fun absUrl(url: String): String = when {

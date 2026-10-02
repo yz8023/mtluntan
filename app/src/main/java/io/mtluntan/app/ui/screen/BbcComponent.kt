@@ -140,7 +140,7 @@ private fun richText(raw: String, modifier: Modifier = Modifier, maxLines: Int =
 /**
  * 正文渲染入口。
  *
- * @param onImageClick 点开大图（传出图片列表与当前下标）
+ * @param onImageClick 点开大图（传出图片列表 + 点中的那张 URL）
  * @param onUnlockClick 「回复可见」时的解锁按钮
  */
 @Composable
@@ -148,13 +148,16 @@ fun BbcContent(
     bbc: String,
     contentHtml: String = "",
     modifier: Modifier = Modifier,
-    onImageClick: ((List<String>, Int) -> Unit)? = null,
+    onImageClick: ((List<String>, String) -> Unit)? = null,
     onUnlockClick: (() -> Unit)? = null,
     forceUnlocked: Boolean = false,
 ) {
     val source = bbc.ifBlank { contentHtml }
     val blocks = remember(source, forceUnlocked) { BbcBlocks.parse(source, forceUnlocked) }
-    val allImages = remember(blocks) { blocks.filterIsInstance<BbcBlock.Image>().map { it.url } }
+    // 图廊只收「正文配图」：表情（smiley）不进图廊，所以不会点开一张不相干的图
+    val allImages = remember(blocks) {
+        BbcBlocks.contentImages(blocks.filterIsInstance<BbcBlock.Image>().map { it.url })
+    }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         blocks.forEach { block ->
@@ -168,8 +171,8 @@ fun BbcContent(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
                         .clickable {
-                            val idx = allImages.indexOf(block.url).coerceAtLeast(0)
-                            onImageClick?.invoke(allImages, idx)
+                            // 传「点的是哪张 URL」而不是下标：列表为空/顺序变化都不会开错图
+                            onImageClick?.invoke(allImages, block.url)
                         },
                 )
                 is BbcBlock.Hide -> HideBlockCard(block, onUnlockClick)
@@ -362,11 +365,12 @@ private fun AttachmentRow(block: BbcBlock.Attachment) {
 
 /** 全屏看图：双指缩放 + 拖动（对应 Java 版的 ZoomableImageView）。 */
 @Composable
-fun ImageGallery(urls: List<String>, startIndex: Int, onDismiss: () -> Unit) {
+fun ImageGallery(urls: List<String>, startUrl: String, onDismiss: () -> Unit) {
     if (urls.isEmpty()) return
-    // 下标全部夹紧：urls 为空/变短、startIndex 越界都不会再越界访问（崩溃修复）
+    // 起点按 URL 定位（找不到就用第一张）；下标一律夹紧，绝不会越界
     val lastIndex = urls.lastIndex.coerceAtLeast(0)
-    var index by remember(urls) { mutableStateOf(startIndex.coerceIn(0, lastIndex)) }
+    val start = urls.indexOf(startUrl).let { if (it >= 0) it else 0 }
+    var index by remember(urls, startUrl) { mutableStateOf(start.coerceIn(0, lastIndex)) }
     val safeIndex = index.coerceIn(0, lastIndex)
     Dialog(onDismissRequest = onDismiss) {
         var scale by remember { mutableStateOf(1f) }

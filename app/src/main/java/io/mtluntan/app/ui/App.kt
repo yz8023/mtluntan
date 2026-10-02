@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -162,10 +163,11 @@ fun App(app: MTLuntanApp) {
         drawerState = drawerState,
         gesturesEnabled = onTab,
         drawerContent = {
+            // 抽屉：不加外层 padding —— 之前 padding(10.dp) 让抽屉收回后仍有一条边露在屏幕外
+            // （用户反馈「没用的时候显示太明显，直接突出来了」）。宽度也收一点，视觉更像悬浮面板。
             ModalDrawerSheet(
-                modifier = Modifier
-                    .padding(10.dp)
-                    .clip(RoundedCornerShape(24.dp)),
+                modifier = Modifier.widthIn(max = 300.dp),
+                drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
                     alpha = if (glass == GlassLevel.Off) 1f else glass.surfaceAlpha
                 ),

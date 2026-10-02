@@ -70,6 +70,22 @@ object ThreadExtrasParser : BaseParser() {
 
     // ---------------- 附件 ----------------
 
+    /**
+     * 从页面里抠 fid（版块 id）。
+     * 回复接口必须带正确的 fid，解析不到时这里兜底：先看 action=reply&fid= 的表单，
+     * 再看版块链接 / 面包屑。
+     */
+    fun fidOf(html: String): Long {
+        val doc = Parsing.doc(html)
+        Regex("action=reply&(?:amp;)?fid=(\\d+)").find(html)?.let {
+            return it.groupValues[1].toLongOrNull() ?: 0L
+        }
+        val link = doc.select("a[href*=forum-], a[href*=forumdisplay]").firstOrNull()?.attr("href").orEmpty()
+        Regex("forum-(\\d+)-").find(link)?.let { return it.groupValues[1].toLongOrNull() ?: 0L }
+        Regex("[?&]fid=(\\d+)").find(link)?.let { return it.groupValues[1].toLongOrNull() ?: 0L }
+        return 0L
+    }
+
     fun attachments(html: String): List<Attachment> {
         if (html.isBlank()) return emptyList()
         val doc = Parsing.doc(html)
