@@ -45,6 +45,14 @@ class AppSettings(private val context: Context) {
         val KEY_TOOLBAR_ROWS = intPreferencesKey("bbc_toolbar_rows")        // 工具条显示行数，默认 2
         val KEY_REPLY_PREVIEW = booleanPreferencesKey("bbc_reply_preview")  // 回复时实时预览
 
+        // ---- 社区页排版（用户可自定义显示项目与排版方式） ----
+        /** 0 文字纵列 / 1 图标·两列 / 2 图标·三列 / 3 图标·横向滑动 */
+        val KEY_COMMUNITY_LAYOUT = intPreferencesKey("community_layout")
+        /** 隐藏的版块 id（逗号分隔），空 = 全部显示 */
+        val KEY_COMMUNITY_HIDDEN = stringPreferencesKey("community_hidden")
+        /** 自定义排序的版块 id（逗号分隔，未列出的排在后面） */
+        val KEY_COMMUNITY_ORDER = stringPreferencesKey("community_order")
+
         // ---- 网络与阅读 ----
         val KEY_DESKTOP_MODE = booleanPreferencesKey("desktop_mode")
         val KEY_DOWNLOAD_MODE = stringPreferencesKey("download_mode")   // inapp | browser
@@ -120,6 +128,10 @@ class AppSettings(private val context: Context) {
     val defaultView: Flow<String> = context.dataStore.data.map { it[KEY_DEFAULT_VIEW] ?: "newthread" }
 
     val activeAccount: Flow<String?> = context.dataStore.data.map { it[KEY_ACTIVE_ACCOUNT] }
+    val communityLayout: Flow<Int> = context.dataStore.data.map { it[KEY_COMMUNITY_LAYOUT] ?: 0 }
+    val communityHidden: Flow<String> = context.dataStore.data.map { it[KEY_COMMUNITY_HIDDEN] ?: "" }
+    val communityOrder: Flow<String> = context.dataStore.data.map { it[KEY_COMMUNITY_ORDER] ?: "" }
+
     val autoSign: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_SIGN] ?: true }
     val signHour: Flow<Int> = context.dataStore.data.map { it[KEY_SIGN_HOUR] ?: 8 }
     val signMinute: Flow<Int> = context.dataStore.data.map { it[KEY_SIGN_MINUTE] ?: 30 }
@@ -183,6 +195,12 @@ class AppSettings(private val context: Context) {
     suspend fun setMotionDamping(v: Int) = context.dataStore.edit { it[KEY_MOTION_DAMPING] = v.coerceIn(0, 100) }
     suspend fun setCustomSeed(v: Long) = context.dataStore.edit { it[KEY_CUSTOM_SEED] = v }
     suspend fun setAutoPagination(v: Boolean) = context.dataStore.edit { it[KEY_AUTO_PAGINATION] = v }
+    suspend fun setCommunityLayout(v: Int) = context.dataStore.edit { it[KEY_COMMUNITY_LAYOUT] = v.coerceIn(0, 3) }
+
+    suspend fun setCommunityHidden(v: String) = context.dataStore.edit { it[KEY_COMMUNITY_HIDDEN] = v }
+
+    suspend fun setCommunityOrder(v: String) = context.dataStore.edit { it[KEY_COMMUNITY_ORDER] = v }
+
     suspend fun setToolbarStyle(v: String) = context.dataStore.edit { it[KEY_TOOLBAR_STYLE] = if (v == "text") "text" else "icon" }
     suspend fun setToolbarRows(v: Int) = context.dataStore.edit { it[KEY_TOOLBAR_ROWS] = v.coerceIn(1, 4) }
     suspend fun setReplyPreview(v: Boolean) = context.dataStore.edit { it[KEY_REPLY_PREVIEW] = v }

@@ -148,6 +148,9 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     // 同时保留「上一页（收起最后一页）/ 回到第 1 页」的入口，避免又出现「回不去」。
     val appendedPages = remember { mutableStateListOf<List<io.mtluntan.app.domain.model.Post>>() }
     var appending by remember { mutableStateOf(false) }
+    // 站点分页有时解析不出总页数（totalPages<=1），所以「还有没有下一页」不能只看 totalPages：
+    // 一直试到某一页真的没有新楼层为止（用户反馈「评论区无法自动拼接下一页」）。
+    var reachedEnd by remember { mutableStateOf(false) }
     // 评论区标题栏的两个开关（对齐参考项目「只看楼主 / 回复顺序」）：纯本地过滤，不发请求
     var onlyOp by remember { mutableStateOf(false) }
     var replyDescending by remember { mutableStateOf(false) }
@@ -200,6 +203,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 favorited = app.local.isFavorite(tid)
                 // 整页加载（首次进入 / 继续阅读 / 跳页）时清掉之前拼接进来的后续页
                 appendedPages.clear()
+                reachedEnd = false
                 likedPids.clear(); likedPids.addAll(if (parsed.likedByCurrent) listOf(parsed.mainPost?.pid ?: 0L) else emptyList())
                 editablePids.clear(); editablePids.addAll(ThreadExtrasParser.editablePids(html))
                 deletablePids.clear(); deletablePids.addAll(ThreadExtrasParser.deletablePids(html))
@@ -238,9 +242,10 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
      */
     suspend fun appendNextPage() {
         val d = detail ?: return
+        if (appending || reachedEnd) return
         val next = d.currentPage + appendedPages.size + 1
-        if (appending) return
-        if (next > d.totalPages) {
+        if (d.totalPages > 0 && next > d.totalPages) {
+            reachedEnd = true
             CopyUtil.toast(context, "已经是最后一页了")
             return
         }
@@ -250,13 +255,35 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
             val parsed = io.mtluntan.app.data.parser.ThreadDetailParser.parse(html, next)
             val existing = (listOfNotNull(d.mainPost) + d.posts + appendedPages.flatten()).map { it.pid }.toSet()
             val fresh = parsed.posts.filter { it.pid !in existing }
-            if (fresh.isEmpty()) CopyUtil.toast(context, "第 $next 页没有新回复")
-            // 即使这一页没有新楼层也占位推进，避免「下一页」卡在同一页
-            appendedPages.add(fresh)
+            if (fresh.isEmpty()) {
+                // 这一页没有新内容 → 到底了（记住，别一直重试）
+                reachedEnd = true
+                CopyUtil.toast(context, "已经是最新的回复了")
+            } else {
+                appendedPages.add(fresh)
+                CopyUtil.toast(context, "已拼接第 $next 页（+${fresh.size} 楼）")
+            }
         } catch (e: Exception) {
             CopyUtil.toast(context, "加载第 $next 页失败：${e.message}")
         }
         appending = false
+    }
+
+    // 自动拼接：列表滚到底部就自动把下一页接上（用户要求「自动拼接下一页」）
+    LaunchedEffect(tid) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val total = info.totalItemsCount
+            last >= total - 2 && total > 0
+        }
+            .distinctUntilChanged()
+            .collectLatest { atBottom ->
+                if (atBottom && !appending && !reachedEnd) {
+                    delay(250)   // 手滑到底时略微等一下，避免刚进来就请求
+                    appendNextPage()
+                }
+            }
     }
 
     val generation by Refresh.generation.collectAsStateWithLifecycle(initialValue = 0)
@@ -1546,7 +1573,7 @@ private fun CommentPagerRow(
             } else {
                 TextButton(
                     onClick = onNext,
-                    enabled = loadedThrough < total,
+                    enabled = loadedThrough < total || total <= 1,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                 ) { Text(if (multi) "接着拼＋" else "下一页＋", style = MaterialTheme.typography.labelLarge) }
             }
@@ -1583,7 +1610,7 @@ private fun PageFooter(
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         if (busy) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-        else TextButton(onClick = onNext, enabled = through < total) { Text("下一页＋") }
+        else TextButton(onClick = onNext, enabled = through < total || total <= 1) { Text("下一页＋") }
     }
 }
 

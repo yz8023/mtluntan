@@ -4,6 +4,8 @@ import io.mtluntan.app.data.parser.ThreadListParser
 import io.mtluntan.app.data.parser.ForumIndexParser
 import io.mtluntan.app.data.parser.ThreadDetailParser
 import io.mtluntan.app.data.parser.UserPagesParser
+import io.mtluntan.app.data.parser.BbcBlocks
+import io.mtluntan.app.data.parser.BbcBlock
 import io.mtluntan.app.data.parser.BbcToHtml
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -213,5 +215,28 @@ class ParserTest {
         assertEquals("楼主甲", detail.mainPost?.authorName)
         assertEquals(1, detail.posts.size)
         assertEquals("楼层乙", detail.posts.first().authorName)
+    }
+
+    @Test
+    fun bbcProtocolRelativeImagesAreKept() {
+        // 站点常给 //bbs.binmt.cc/... 这种协议相对地址：1.1.5 之前会被漏成一段文字
+        val blocks = BbcBlocks.parse("[img]//bbs.binmt.cc/data/attachment/forum/1.png[/img]")
+        val img = blocks.filterIsInstance<BbcBlock.Image>().firstOrNull()
+        assertTrue(img != null)
+        assertEquals("https://bbs.binmt.cc/data/attachment/forum/1.png", img!!.url)
+    }
+
+    @Test
+    fun bbcRelativeImagesAreKept() {
+        val blocks = BbcBlocks.parse("[img]data/attachment/forum/2.jpg[/img]")
+        val img = blocks.filterIsInstance<BbcBlock.Image>().firstOrNull()
+        assertTrue(img != null)
+        assertEquals("https://bbs.binmt.cc/data/attachment/forum/2.jpg", img!!.url)
+    }
+
+    @Test
+    fun bbcAbsoluteImagesKeepHttps() {
+        val blocks = BbcBlocks.parse("[img]http://example.com/a.png[/img]")
+        assertEquals("http://example.com/a.png", blocks.filterIsInstance<BbcBlock.Image>().first().url)
     }
 }

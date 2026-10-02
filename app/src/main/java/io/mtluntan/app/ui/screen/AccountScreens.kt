@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,23 +29,29 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -58,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -75,6 +83,7 @@ import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.util.CopyUtil
 import io.mtluntan.app.util.Refresh
 import kotlinx.coroutines.launch
+import androidx.compose.material3.DropdownMenuItem
 
 /**
  * 账号管理：多账号入库、切换、排序、启用、密码托管（KeyStore 加密）、批量签到。
@@ -134,46 +143,92 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
     ) { pad ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(pad)) {
             item {
-                // 顶部小工具条：一键签到 / 签到记录 / 添加账号（都是紧凑 chip，不再是大白按钮）
-                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 4.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AssistChip(
-                            onClick = {
-                                if (accounts.isEmpty()) { addDialog = true; return@AssistChip }
-                                busy = true
-                                scope.launch {
-                                    // 先看今天签没签过，只签没签的（防重复，避免账号异常）
-                                    val summary = app.sign.autoSignOnOpen(force = true)
-                                        ?: app.sign.signAll(notify = true)
-                                    message = summary.describe()
-                                    busy = false
-                                }
-                            },
-                            label = { Text(if (busy) "正在签到…" else "一键签到") },
-                            leadingIcon = { Icon(Icons.Filled.Sync, null, modifier = Modifier.size(16.dp)) },
+                // 顶部总览卡（1.1.5 重排）：左侧状态摘要，右侧两个主按钮，底部一行小字说明。
+                val enabledCount = accounts.count { it.enabled }
+                val signedToday = accounts.count { it.lastCheckInOk && it.lastCheckIn.isNotBlank() }
+                MtCard(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Filled.ManageAccounts,
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "共 ${accounts.size} 个账号",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    "启用 $enabledCount · 今日已签 $signedToday" +
+                                        (activeName?.let { " · 当前 ${it}" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = {
+                                    if (accounts.isEmpty()) { addDialog = true; return@FilledTonalButton }
+                                    busy = true
+                                    scope.launch {
+                                        // 先看今天签没签过，只签没签的（防重复，避免账号异常）
+                                        val summary = app.sign.autoSignOnOpen(force = true)
+                                            ?: app.sign.signAll(notify = true)
+                                        message = summary.describe()
+                                        busy = false
+                                    }
+                                },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Filled.Sync, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (busy) "正在签到…" else "一键签到")
+                            }
+                            OutlinedButton(
+                                onClick = { nav.navigate(Routes.SIGN_RECORDS) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Filled.History, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("签到记录")
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "账号间隔 ${spacing} 秒；同一账号当天已签到会自动跳过。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
                         )
-                        AssistChip(
-                            onClick = { nav.navigate(Routes.SIGN_RECORDS) },
-                            label = { Text("签到记录") },
-                        )
-                        AssistChip(
-                            onClick = { addDialog = true },
-                            label = { Text("添加账号") },
-                            leadingIcon = { Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp)) },
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "账号之间间隔 ${spacing} 秒签到（设置里可调）；同一账号当天已签到会自动跳过。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                    if (message.isNotEmpty()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        if (message.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -248,7 +303,7 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                         }
                     },
                 )
-                if (index < accounts.lastIndex) MtDivider(startIndent = 20.dp)
+                // 卡片之间靠间距分隔，不再插横线（排版更干净）
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
@@ -620,108 +675,204 @@ private fun AccountCard(
     onSign: () -> Unit,
     onCheckSession: () -> Unit,
 ) {
-    MtCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
+    var menu by remember { mutableStateOf(false) }
+    var infoExpanded by remember { mutableStateOf(false) }
+
+    MtCard(
+        tint = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.06f) else null,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // ---- 头部：头像 + 名字/徽章 + 开关 & 更多菜单 ----
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = account.avatarUrl.ifBlank { io.mtluntan.app.data.network.Site.avatarUrl(account.uid) },
-                    contentDescription = null,
-                    modifier = Modifier.size(44.dp).clip(CircleShape),
-                )
-                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .size(if (isActive) 52.dp else 48.dp)
+                        .clip(CircleShape)
+                        .background(if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(if (isActive) 2.dp else 0.dp),
+                ) {
+                    AsyncImage(
+                        model = account.avatarUrl.ifBlank { io.mtluntan.app.data.network.Site.avatarUrl(account.uid) },
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        account.displayName.ifBlank { account.username },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(3.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            account.displayName.ifBlank { account.username },
-                            style = MaterialTheme.typography.titleSmall,
-                        )
                         if (isActive) {
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "当前",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                            )
+                            AccountTag("当前使用", MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        if (!account.enabled) {
+                            AccountTag("已停用", MaterialTheme.colorScheme.outline)
+                            Spacer(Modifier.width(4.dp))
                         }
                         if (account.expired) {
-                            Spacer(Modifier.width(6.dp))
-                            Text("可能掉线", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            AccountTag("可能掉线", MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(4.dp))
                         }
                         if (hasPassword) {
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.Filled.Key, "已托管密码", modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.secondary)
+                            AccountTag("已托管密码", MaterialTheme.colorScheme.secondary)
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        if (account.lastCheckInOk && account.lastCheckIn.isNotBlank()) {
+                            AccountTag("今日已签", MaterialTheme.colorScheme.tertiary)
                         }
                     }
-                    // 用户名 / UID / 用户组 / 积分：账号「内容信息」一行行摊开
-                    Text(
-                        buildString {
-                            if (account.username.isNotBlank()) append(account.username)
-                            if (account.uid > 0) { if (isNotEmpty()) append(" · "); append("UID ${account.uid}") }
-                            if (account.groupName.isNotBlank()) { if (isNotEmpty()) append(" · "); append(account.groupName) }
-                        }.ifBlank { "信息待补全：点「检测会话」拉取" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                    if (account.creditsText.isNotBlank()) {
-                        Text(
-                            account.creditsText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
-                        buildString {
-                            if (account.lastCheckIn.isNotBlank()) {
-                                append("签到 ${account.lastCheckIn} ")
-                                append(if (account.lastCheckInOk) "✓" else "✗")
-                            } else append("还没有签到记录")
-                            if (account.signDays > 0) append(" · 连续 ${account.signDays} 天")
-                            if (account.lastSignRank > 0) append(" · 第 ${account.lastSignRank} 名")
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
                 }
                 Switch(checked = account.enabled, onCheckedChange = onToggleEnabled)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-            ) {
-                if (!isActive) {
-                    AssistChip(onClick = onActivate, label = { Text("切换") })
+                Box {
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Filled.MoreVert, "更多操作", modifier = Modifier.size(20.dp))
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("编辑资料") },
+                            leadingIcon = { Icon(Icons.Filled.Edit, null, modifier = Modifier.size(18.dp)) },
+                            onClick = { menu = false; onEdit() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (hasPassword) "修改密码" else "托管密码") },
+                            leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(18.dp)) },
+                            onClick = { menu = false; onSetPassword() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("上移") },
+                            leadingIcon = { Icon(Icons.Filled.ArrowUpward, null, modifier = Modifier.size(18.dp)) },
+                            onClick = { menu = false; onMove(-1) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("下移") },
+                            leadingIcon = { Icon(Icons.Filled.ArrowDownward, null, modifier = Modifier.size(18.dp)) },
+                            onClick = { menu = false; onMove(1) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("删除账号", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                            },
+                            onClick = { menu = false; onDelete() },
+                        )
+                    }
                 }
-                AssistChip(onClick = onSign, label = { Text("签到") })
-                AssistChip(onClick = onCheckSession, label = { Text("检测会话") })
-                AssistChip(
-                    onClick = onSetPassword,
-                    label = { Text(if (hasPassword) "改密码" else "存密码") },
-                    leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(14.dp)) },
+            }
+
+            Spacer(Modifier.height(10.dp))
+            // ---- 信息区：两列网格，不再一长串灰色小字 ----
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                AccountInfoCell(
+                    "账号",
+                    account.username.ifBlank { "—" },
+                    Modifier.weight(1f),
                 )
-                AssistChip(
-                    onClick = onEdit,
-                    label = { Text("编辑") },
-                    leadingIcon = { Icon(Icons.Filled.Edit, null, modifier = Modifier.size(14.dp)) },
+                AccountInfoCell(
+                    "UID / 用户组",
+                    listOfNotNull(
+                        account.uid.takeIf { it > 0 }?.toString(),
+                        account.groupName.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ").ifBlank { "未补全" },
+                    Modifier.weight(1f),
                 )
-                AssistChip(
-                    onClick = onDelete,
-                    label = { Text("删除") },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Delete, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                AccountInfoCell(
+                    "签到状态",
+                    buildString {
+                        if (account.lastCheckIn.isNotBlank()) {
+                            append(account.lastCheckIn)
+                            append(if (account.lastCheckInOk) " ✓" else " ✗")
+                        } else append("无记录")
                     },
+                    Modifier.weight(1f),
                 )
-                IconButton(onClick = { onMove(-1) }) { Icon(Icons.Filled.ArrowUpward, "上移", modifier = Modifier.size(16.dp)) }
-                IconButton(onClick = { onMove(1) }) { Icon(Icons.Filled.ArrowDownward, "下移", modifier = Modifier.size(16.dp)) }
+                AccountInfoCell(
+                    "连续 / 排名",
+                    buildString {
+                        if (account.signDays > 0) append("${account.signDays} 天") else append("—")
+                        if (account.lastSignRank > 0) append(" · 第 ${account.lastSignRank} 名")
+                    },
+                    Modifier.weight(1f),
+                )
+            }
+            if (account.creditsText.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .clickable { infoExpanded = !infoExpanded }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        account.creditsText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (infoExpanded) 8 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            // ---- 操作区：只留两个高频按钮，其余的进「更多」菜单 ----
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!isActive) {
+                    FilledTonalButton(onClick = onActivate, modifier = Modifier.weight(1f)) { Text("切换为当前") }
+                } else {
+                    OutlinedButton(onClick = onCheckSession, modifier = Modifier.weight(1f)) { Text("检测会话") }
+                }
+                OutlinedButton(onClick = onSign, modifier = Modifier.weight(1f)) { Text("立即签到") }
+                if (!isActive) {
+                    OutlinedButton(onClick = onCheckSession, modifier = Modifier.weight(1f)) { Text("检测会话") }
+                }
             }
         }
     }
+}
+
+/** 账号卡里的一个信息格：小标题 + 值。 */
+@Composable
+private fun AccountInfoCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 账号卡上的小标签（当前 / 已停用 / 掉线 / 已托管密码 / 今日已签）。 */
+@Composable
+private fun AccountTag(text: String, color: androidx.compose.ui.graphics.Color) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
 }
 
 /** 签到记录：按账号与日期展示状态 / 排名 / 奖励。 */

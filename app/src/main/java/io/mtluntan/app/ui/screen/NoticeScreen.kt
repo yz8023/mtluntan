@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -77,6 +78,8 @@ import io.mtluntan.app.util.Refresh
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * 消息页（重做版，排版对齐参考项目 `fragment_notice.xml` + `NoticeFragment.java`）。
@@ -182,8 +185,28 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
         loading = false
     }
 
-    LaunchedEffect(generation, activeAccount) { load() }
-    LaunchedEffect(tabTick) { if (tabTick > 0) load() }
+    // 首屏自动加载（用户反馈「点消息不自动加载，要手点刷新」）：
+    // 之前 key 里带了 activeAccount，账号从 null→名字时会把「等账号就绪」的那次加载**取消**掉，
+    // 于是第一屏永远停在异常态。现在拆开：进入必有一次性加载，账号变化只是防抖补一次。
+    var loadToken by remember { mutableIntStateOf(0) }
+    val loadMutex = remember { Mutex() }
+    LaunchedEffect(Unit) { loadMutex.withLock { load() } }
+    LaunchedEffect(activeAccount) {
+        if (activeAccount != null) {
+            kotlinx.coroutines.delay(350)   // 防抖：和首屏那次合并，避免双请求互相打架
+            loadMutex.withLock { load() }
+        }
+    }
+    LaunchedEffect(generation) { if (generation > 0) loadMutex.withLock { load() } }
+    LaunchedEffect(tabTick) { if (tabTick > 0) loadMutex.withLock { load() } }
+    // 首屏异常自动重试一次（网络抖动时用户不用手点刷新）
+    LaunchedEffect(error) {
+        if (error.isNotEmpty() && error != "登录后可以查看通知和私信" && loadToken == 0) {
+            loadToken = 1
+            kotlinx.coroutines.delay(900)
+            loadMutex.withLock { load() }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -493,7 +516,14 @@ fun NoticeListScreen(app: MTLuntanApp, nav: NavHostController, view: String) {
         }
         loading = false
     }
-    LaunchedEffect(view, activeAccount) { load() }
+    // 同消息页：view 变化必加载；账号就绪后再防抖补一次（不再取消首屏那次加载）
+    LaunchedEffect(view) { load() }
+    LaunchedEffect(view, activeAccount) {
+        if (activeAccount != null) {
+            kotlinx.coroutines.delay(350)
+            load()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -634,7 +664,13 @@ fun FollowersScreen(app: MTLuntanApp, nav: NavHostController) {
         }
         loading = false
     }
-    LaunchedEffect(activeAccount) { load() }
+    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(activeAccount) {
+        if (activeAccount != null) {
+            kotlinx.coroutines.delay(350)
+            load()
+        }
+    }
 
     Scaffold(
         topBar = {

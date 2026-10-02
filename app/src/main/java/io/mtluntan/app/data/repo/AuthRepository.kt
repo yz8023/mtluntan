@@ -439,6 +439,7 @@ class AuthRepository(
             val saved = settings.activeAccount.first()
             if (!saved.isNullOrEmpty()) activate(saved)
         }
+        // try/finally 语义：任何异常都要放行，否则等闸门的页面全部卡到超时
         restoreGate.complete(Unit)
     }
 
@@ -449,13 +450,25 @@ class AuthRepository(
      * 消息页抢在恢复完成前就判断了 `activeAccount == null` → 直接显示游客提示。
      * 这里在读取账号前等一下（最多 3 秒），避免误判。
      */
-    suspend fun awaitActiveAccount(timeoutMs: Long = 3000): String? {
-        if (!restoreStarted.get() || settings.activeAccount.first() != null) {
-            // 已经恢复过 / 已经有账号 → 不必等
-            return settings.activeAccount.first()
-        }
+    suspend fun awaitActiveAccount(timeoutMs: Long = 5000): String? {
+        // 用户反馈「点消息不加载，手动刷新才对」：根因是 DataStore 里的 active_account
+        // 比会话切换（cookie jar / SessionHolder）先就绪，页面拿着名字就去请求，
+        // 结果整轮请求都是游客身份 → 全空/异常，刷新时才正常。
+        // 这里改成：等恢复闸门 → 再确认 SessionHolder 已经切到这个账号，没切就补切一次。
+        val saved = runCatching { settings.activeAccount.first() }.getOrNull()
+        // 兜底：万一启动时的恢复从来没被触发（进程被系统杀掉后直接从消息页冷启），
+        // 就地触发一次，内部幂等，绝不会重复恢复
+        if (!restoreStarted.get()) runCatching { restoreFromStorage() }
+        // 无条件等闸门：即使恢复还没开始也要等（之前只在「已开始」时等，
+        // 于是页面会在恢复之前就用 DataStore 里的名字去请求 → 全是游客结果）
         withTimeoutOrNull(timeoutMs) { restoreGate.await() }
-        return settings.activeAccount.first()
+        val current = SessionHolder.activeAccount.value
+        val name = current ?: saved
+        // 名字有了但会话没切过去（cookie jar 还是上一个/游客）→ 补切，否则请求会以游客身份发出
+        if (name != null && current != name) {
+            runCatching { activate(name) }
+        }
+        return name
     }
 
     /**

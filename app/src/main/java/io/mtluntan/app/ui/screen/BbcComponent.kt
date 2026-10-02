@@ -152,6 +152,7 @@ fun BbcContent(
     onUnlockClick: (() -> Unit)? = null,
     forceUnlocked: Boolean = false,
 ) {
+    val context = LocalContext.current
     val source = bbc.ifBlank { contentHtml }
     val blocks = remember(source, forceUnlocked) { BbcBlocks.parse(source, forceUnlocked) }
     // 图廊只收「正文配图」：表情（smiley）不进图廊，所以不会点开一张不相干的图
@@ -164,16 +165,16 @@ fun BbcContent(
             when (block) {
                 is BbcBlock.Code -> CodeBlockCard(block)
                 is BbcBlock.Quote -> QuoteBlockCard(block)
-                is BbcBlock.Image -> AsyncImage(
-                    model = block.url,
-                    contentDescription = "图片",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable {
-                            // 传「点的是哪张 URL」而不是下标：列表为空/顺序变化都不会开错图
-                            onImageClick?.invoke(allImages, block.url)
-                        },
+                is BbcBlock.Image -> io.mtluntan.app.ui.components.PostImage(
+                    url = block.url,
+                    onClick = {
+                        // 传「点的是哪张 URL」而不是下标：列表为空/顺序变化都不会开错图
+                        onImageClick?.invoke(allImages, block.url)
+                    },
+                    onLongClick = {
+                        io.mtluntan.app.util.CopyUtil.copy(context, block.url)
+                        io.mtluntan.app.util.CopyUtil.toast(context, "已复制图片链接")
+                    },
                 )
                 is BbcBlock.Hide -> HideBlockCard(block, onUnlockClick)
                 is BbcBlock.Attachment -> AttachmentRow(block)

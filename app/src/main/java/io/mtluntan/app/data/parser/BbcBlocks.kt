@@ -107,10 +107,17 @@ object BbcBlocks {
                     out += BbcBlock.Free(text = stripTags(body).trim())
                 }
                 "img" -> {
+                    // [img]...[/img] 与 [img=W,H]...[/img] 两种写法都要吃下来
                     val url = body.trim()
-                    if (url.startsWith("http") || url.startsWith("/")) {
+                    val u = if (url.startsWith("http") || url.startsWith("//") || url.startsWith("/")) {
+                        absUrl(url)
+                    } else {
+                        // 相对路径（data/attachment/... 之类）也要能显示，而不是漏成一段文字
+                        if (url.contains('.') && !url.contains('[') && !url.contains(' ')) absUrl(url) else ""
+                    }
+                    if (u.isNotEmpty()) {
                         flushText()
-                        out += BbcBlock.Image(absUrl(url))
+                        out += BbcBlock.Image(u)
                     } else {
                         sb.append(body)
                     }
