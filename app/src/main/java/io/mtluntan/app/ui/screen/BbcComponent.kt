@@ -102,12 +102,18 @@ private fun inlines(raw: String, linkColor: Color): List<InlineSpan> {
     return out
 }
 
+private fun isHexDigit(c: Char): Boolean =
+    (c in '0'..'9') || (c in 'a'..'f') || (c in 'A'..'F')
+
 private fun parseColor(v: String?): Color? {
     val hex = (v ?: "").trim().removePrefix("#")
     return when {
-        hex.length == 6 -> Color(0xFF000000L or (hex.toLongOrNull(16) ?: return null))
+        hex.length == 6 -> {
+            if (hex.all { isHexDigit(it) }) Color(0xFF000000L or (hex.toLongOrNull(16) ?: return null)) else null
+        }
         hex.length == 3 -> {
             val r = hex[0]; val g = hex[1]; val b = hex[2]
+            if (!isHexDigit(r) || !isHexDigit(g) || !isHexDigit(b)) return null
             Color(0xFF000000L or ("$r$r$g$g$b$b".toLong(16)))
         }
         else -> null
@@ -358,8 +364,10 @@ private fun AttachmentRow(block: BbcBlock.Attachment) {
 @Composable
 fun ImageGallery(urls: List<String>, startIndex: Int, onDismiss: () -> Unit) {
     if (urls.isEmpty()) return
-    var index by remember { mutableStateOf(startIndex.coerceIn(0, urls.size - 1)) }
-    if (index >= urls.size) index = 0
+    // 下标全部夹紧：urls 为空/变短、startIndex 越界都不会再越界访问（崩溃修复）
+    val lastIndex = urls.lastIndex.coerceAtLeast(0)
+    var index by remember(urls) { mutableStateOf(startIndex.coerceIn(0, lastIndex)) }
+    val safeIndex = index.coerceIn(0, lastIndex)
     Dialog(onDismissRequest = onDismiss) {
         var scale by remember { mutableStateOf(1f) }
         var offsetX by remember { mutableStateOf(0f) }
@@ -372,7 +380,7 @@ fun ImageGallery(urls: List<String>, startIndex: Int, onDismiss: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             AsyncImage(
-                model = urls[index],
+                model = urls[safeIndex],
                 contentDescription = "大图",
                 modifier = Modifier
                     .fillMaxWidth()
@@ -382,7 +390,7 @@ fun ImageGallery(urls: List<String>, startIndex: Int, onDismiss: () -> Unit) {
                         translationX = offsetX,
                         translationY = offsetY,
                     )
-                    .pointerInput(index) {
+                    .pointerInput(safeIndex) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             scale = (scale * zoom).coerceIn(1f, 5f)
                             offsetX += pan.x
@@ -397,10 +405,16 @@ fun ImageGallery(urls: List<String>, startIndex: Int, onDismiss: () -> Unit) {
                         .padding(24.dp),
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
-                    TextButton(onClick = { index = (index - 1 + urls.size) % urls.size; scale = 1f; offsetX = 0f; offsetY = 0f }) {
-                        Text("上一张（${index + 1}/${urls.size}）", color = Color.White)
+                    TextButton(onClick = {
+                        index = (safeIndex - 1 + urls.size) % urls.size
+                        scale = 1f; offsetX = 0f; offsetY = 0f
+                    }) {
+                        Text("上一张（${safeIndex + 1}/${urls.size}）", color = Color.White)
                     }
-                    TextButton(onClick = { index = (index + 1) % urls.size; scale = 1f; offsetX = 0f; offsetY = 0f }) {
+                    TextButton(onClick = {
+                        index = (safeIndex + 1) % urls.size
+                        scale = 1f; offsetX = 0f; offsetY = 0f
+                    }) {
                         Text("下一张", color = Color.White)
                     }
                 }

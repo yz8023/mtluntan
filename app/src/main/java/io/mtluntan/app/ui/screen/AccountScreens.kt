@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
@@ -231,6 +234,8 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                                             uid = profile.uid,
                                             nickname = profile.username,
                                             avatar = profile.avatarUrl,
+                                            group = profile.groupName,
+                                            credits = profile.creditsText,
                                         )
                                         app.auth.refreshCookieSnapshot(account.username)
                                         message += " · 已补全为 ${profile.username.ifBlank { "uid_" + profile.uid }}"
@@ -294,32 +299,44 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                         cookieBusy = true
                         scope.launch {
                             try {
+                                app.auth.beginImport()
                                 app.auth.stagePendingCookies(raw)
                                 val profile = app.forum.identityOf(app.auth.pendingClient())
-                                val username = profile.username.ifBlank { "uid_${profile.uid}" }
-                                if (profile.uid <= 0 && profile.username.isBlank()) {
-                                    if (nameFallback.isBlank()) {
-                                        nameFallback = "account_${System.currentTimeMillis() % 100000}"
-                                        CopyUtil.toast(context, "Cookie 没换到身份信息，确认名字后再点一次")
-                                        return@launch
-                                    }
-                                    app.auth.importStaged(raw, nameFallback, 0, nameFallback)
-                                } else {
-                                    app.auth.importStaged(
-                                        cookieString = raw,
-                                        username = username,
-                                        uid = profile.uid,
-                                        nickname = profile.username,
-                                        avatar = profile.avatarUrl,
+                                val outcome = app.auth.importStaged(
+                                    cookieString = raw,
+                                    username = profile.username,
+                                    uid = profile.uid,
+                                    nickname = profile.username,
+                                    avatar = profile.avatarUrl,
+                                    group = profile.groupName,
+                                    credits = profile.creditsText,
+                                )
+                                if (outcome is io.mtluntan.app.data.repo.AuthRepository.ImportOutcome.Ok) {
+                                    CopyUtil.toast(
+                                        context,
+                                        if (outcome.isNew) "已添加：${outcome.username} (uid ${profile.uid})"
+                                        else "这个账号已在列表里：${outcome.username}（已刷新会话）",
                                     )
+                                    cookieDialog = false
+                                    cookieInput = ""
+                                    nameFallback = ""
+                                } else if (nameFallback.isBlank()) {
+                                    CopyUtil.toast(context, "Cookie 没换到身份信息，请填一个名字后再点一次")
+                                } else {
+                                    val forced = app.auth.importStaged(raw, nameFallback, 0, nameFallback)
+                                    if (forced is io.mtluntan.app.data.repo.AuthRepository.ImportOutcome.Ok) {
+                                        CopyUtil.toast(context, "已添加：${forced.username}")
+                                        cookieDialog = false
+                                        cookieInput = ""
+                                        nameFallback = ""
+                                    } else {
+                                        CopyUtil.toast(context, "名字不能是「论坛 / 登录 / 纯数字」这类字样")
+                                    }
                                 }
-                                CopyUtil.toast(context, "已添加：$username")
-                                cookieDialog = false
-                                cookieInput = ""
-                                nameFallback = ""
                             } catch (t: Throwable) {
                                 CopyUtil.toast(context, "导入失败：${t.message}")
                             } finally {
+                                app.auth.endImport()
                                 cookieBusy = false
                             }
                         }
@@ -479,12 +496,19 @@ private fun AccountCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            account.displayName,
+                            account.displayName.ifBlank { account.username },
                             style = MaterialTheme.typography.titleSmall,
                         )
                         if (isActive) {
                             Spacer(Modifier.width(6.dp))
-                            Text("当前", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "当前",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                            )
                         }
                         if (account.expired) {
                             Spacer(Modifier.width(6.dp))
@@ -492,17 +516,28 @@ private fun AccountCard(
                         }
                         if (hasPassword) {
                             Spacer(Modifier.width(6.dp))
-                            Icon(Icons.Filled.Key, null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.secondary)
+                            Icon(Icons.Filled.Key, "已托管密码", modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.secondary)
                         }
                     }
+                    // 用户名 / UID / 用户组 / 积分：账号「内容信息」一行行摊开
                     Text(
                         buildString {
-                            append(account.username)
-                            if (account.uid > 0) append(" · UID ${account.uid}")
-                        },
+                            if (account.username.isNotBlank()) append(account.username)
+                            if (account.uid > 0) { if (isNotEmpty()) append(" · "); append("UID ${account.uid}") }
+                            if (account.groupName.isNotBlank()) { if (isNotEmpty()) append(" · "); append(account.groupName) }
+                        }.ifBlank { "信息待补全：点「检测会话」拉取" },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                    if (account.creditsText.isNotBlank()) {
+                        Text(
+                            account.creditsText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Text(
                         buildString {
                             if (account.lastCheckIn.isNotBlank()) {
@@ -510,6 +545,7 @@ private fun AccountCard(
                                 append(if (account.lastCheckInOk) "✓" else "✗")
                             } else append("还没有签到记录")
                             if (account.signDays > 0) append(" · 连续 ${account.signDays} 天")
+                            if (account.lastSignRank > 0) append(" · 第 ${account.lastSignRank} 名")
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,

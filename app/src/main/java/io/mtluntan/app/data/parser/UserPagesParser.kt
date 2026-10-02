@@ -8,26 +8,67 @@ import io.mtluntan.app.util.UrlUtil
 /** Parses profile/space, my-posts, notifications and PM pages. */
 object UserPagesParser : BaseParser() {
 
+    /**
+     * 个人页（space / profile）解析。
+     *
+     * 选择器直接沿用 Java 版 `ForumParser.parseUserProfile`（在真机上跑通的版本）：
+     * Comiis 模板的头像是 `.comiis_space_tx img`，用户名在 `.comiis_space_tx h2`，
+     * 等级是 `.kmlevs.kmlv`（Lv.X），用户组是 `.kmlev`（硕士生），
+     * UID 在「用户ID」那一行的 `.profile_rs`。
+     *
+     * 特别注意：**绝不拿 <title> 或站点名当用户名** —— 所有账号的标题都一样，
+     * 用它当账号标识会让第二个账号直接覆盖第一个账号。
+     */
     fun parseProfile(html: String): UserProfile {
         val doc = Parsing.doc(html)
         val check = Parsing.checkPageError(doc, html)
         if (check.isError) return UserProfile()
 
-        val uid = Parsing.findUid(doc)
-        val username = Parsing.text(doc.select(".comiis_fssjname, .mt_username, h1.ph a, .xl3 a").firstOrNull())
-            .ifEmpty { Parsing.text(doc.select("title").firstOrNull()) }
-        val groupName = Parsing.text(doc.select("p.mt_u_1 a, .comiis_me_gr, dt a[href*=usergroup]").firstOrNull())
+        var uid = Parsing.findUid(doc)
+        if (uid <= 0) {
+            val raw = Parsing.text(doc.select(".comiis_space_profile li:contains(用户ID) .profile_rs, .uid, em:contains(UID)").firstOrNull())
+            uid = Regex("\\d{1,12}").find(raw)?.value?.toLongOrNull() ?: 0
+        }
+        if (uid <= 0) uid = Parsing.findUidInScripts(doc)
+
+        val username = sanitizeUsername(
+            Parsing.text(
+                doc.select(
+                    ".comiis_space_tx h2, .comiis_fssjname, .comiis_me_name, .mt_username, " +
+                        ".username, .user_name, .profile_name, h1.ph a, .xl3 a, .mt_u_name"
+                ).firstOrNull()
+            )
+        ).ifEmpty {
+            // 再看一眼带 space-uid 的链接文字
+            sanitizeUsername(Parsing.text(doc.select("a[href*=space-uid], a[href*=\"space&uid=\"]").firstOrNull()))
+        }
+
+        // 头像：先找个人页头部容器里的（不能抓导航栏那个「当前登录用户」头像），
+        // 最后按 uid 直接构造 uc_server 地址。
+        val avatarEl = doc.select(".comiis_space_tx .user_img img, .comiis_space_tx img[src*=avatar], .comiis_space_tx img")
+            .firstOrNull() ?: doc.select("img[src*=avatar]").firstOrNull()
+        val avatar = avatarEl?.attr("src").orEmpty()
+            .ifEmpty { avatarEl?.attr("data-original").orEmpty() }
+            .ifEmpty { avatarEl?.attr("data-src").orEmpty() }
+            .let { if (it.isNotEmpty()) abs(it) else "" }
+            .let { if (it.startsWith("data:")) "" else it }
+            .ifEmpty { if (uid > 0) avatarOf(uid) else "" }
+
+        val level = Parsing.text(doc.select(".comiis_space_tx .kmlevs.kmlv, .comiis_space_tx .kmlv, em:contains(Lv)").firstOrNull())
+        val groupName = Parsing.text(doc.select(".comiis_space_tx .kmlev, p.mt_u_1 a, .comiis_me_gr, dt a[href*=usergroup], a[href*=usergroup]").firstOrNull())
+            .ifEmpty { Parsing.text(doc.select("li:contains(用户组) em, li:contains(用户组) span").firstOrNull()) }
         val registerTime = Parsing.text(doc.select("li:contains(注册时间) em, li:contains(注册时间) span").firstOrNull())
         val lastVisit = Parsing.text(doc.select("li:contains(最后活跃) em, li:contains(最后访问) em, li:contains(最后访问) span").firstOrNull())
         val signature = Parsing.text(doc.select("p.sign, .sx2, .comiis_qm textarea").firstOrNull())
 
         val stat = StatExtractor.fromListItems(doc)
+        val creditsText = Parsing.text(doc.select(".comiis_space_profilejf ul li").firstOrNull())
 
         return UserProfile(
             uid = uid,
             username = username,
-            avatarUrl = if (uid > 0) avatarOf(uid) else "",
-            groupName = groupName,
+            avatarUrl = avatar,
+            groupName = groupName.ifBlank { level },
             registerTime = registerTime,
             lastVisit = lastVisit,
             signature = signature,
@@ -36,6 +77,7 @@ object UserPagesParser : BaseParser() {
             credits = stat.credits,
             goldCoin = stat.goldCoin,
             reputation = stat.reputation,
+            creditsText = creditsText.replace(Regex("\\s+"), " ").trim().take(60),
         )
     }
 
@@ -104,6 +146,25 @@ object UserPagesParser : BaseParser() {
             }
         }
         return out
+    }
+
+    /**
+     * 用户名清洗 / 校验。
+     *
+     * 从页面里抓到的「用户名」有可能是页面标题、站点名、提示语。
+     * 这类字符串每个账号都一样，一旦入库就会互相覆盖，所以这里必须挡掉。
+     */
+    fun sanitizeUsername(raw: String): String {
+        val name = raw.trim().replace(Regex("\\s+"), " ")
+        if (name.isEmpty() || name.length > 24) return ""
+        val junk = listOf(
+            "论坛", "Powered", "powered", "登录", "注册", "提示", "个人资料", "搜索结果",
+            "空间", "首页", "Discuz", "discuz", "错误", "无权", "该用户", "无效",
+        )
+        if (junk.any { name.contains(it) }) return ""
+        if (!name.any { it.isLetter() || it.isDigit() }) return ""
+        if (name.all { it.isDigit() }) return ""   // 纯数字不是合法用户名
+        return name
     }
 }
 

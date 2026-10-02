@@ -112,9 +112,16 @@ fun EditorScreen(
     var title by remember { mutableStateOf("") }
     var field by remember { mutableStateOf(TextFieldValue("")) }
     var submitting by remember { mutableStateOf(false) }
-    var previewing by remember { mutableStateOf(false) }
+    var livePreview by remember { mutableStateOf(true) }
     var uploading by remember { mutableStateOf(false) }
     val quickReplies by app.settings.quickReplies.collectAsStateWithLifecycle(initialValue = "")
+    // 工具条形态（文字 / 图标）与行数（默认 2 行），以及「实时预览」开关
+    val toolbarStyle by app.settings.toolbarStyle.collectAsStateWithLifecycle(initialValue = "icon")
+    val toolbarRows by app.settings.toolbarRows.collectAsStateWithLifecycle(initialValue = 2)
+    val livePreviewSetting by app.settings.replyPreview.collectAsStateWithLifecycle(initialValue = true)
+
+    // 设置里改了「实时预览」→ 跟着切（用户不用手动点开）
+    LaunchedEffect(livePreviewSetting) { livePreview = livePreviewSetting }
     var lastSavedAt by remember { mutableStateOf(0L) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -204,8 +211,8 @@ fun EditorScreen(
                     }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
-                    IconButton(onClick = { previewing = !previewing }) {
-                        Icon(Icons.Filled.Slideshow, "预览")
+                    IconButton(onClick = { livePreview = !livePreview }) {
+                        Icon(Icons.Filled.Slideshow, if (livePreview) "收起实时预览" else "打开实时预览")
                     }
                     IconButton(onClick = {
                         scope.launch {
@@ -249,29 +256,46 @@ fun EditorScreen(
                 )
             }
 
-            if (!previewing) {
-                OutlinedTextField(
-                    value = field,
-                    onValueChange = { field = it },
-                    label = { Text("正文（支持 BBCode）") },
+            OutlinedTextField(
+                value = field,
+                onValueChange = { field = it },
+                label = { Text("正文（支持 BBCode）") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 10.dp),
+            )
+
+            // 实时预览：边打字边渲染（BbcContent 是同步渲染，不需要手动触发）
+            if (livePreview) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 10.dp),
-                )
-            } else {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 10.dp),
+                        .heightIn(max = 190.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
                 ) {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(10.dp)) {
-                        Text("预览", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                        Text(
+                            "实时预览",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
                         Spacer(Modifier.height(6.dp))
-                        BbcContent(bbc = field.text)
-                        if (GradientText.segments(field.text).any { it.brush != null }) {
-                            Spacer(Modifier.height(8.dp))
-                            Text("渐变字预览", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-                            GradientPreview(field.text)
+                        if (field.text.isBlank()) {
+                            Text(
+                                "输入内容后这里实时显示效果",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        } else {
+                            BbcContent(bbc = field.text)
+                            if (GradientText.segments(field.text).any { it.brush != null }) {
+                                Spacer(Modifier.height(8.dp))
+                                Text("渐变字预览", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                GradientPreview(field.text)
+                            }
                         }
                     }
                 }
@@ -301,6 +325,8 @@ fun EditorScreen(
                 onWrap = { open, close -> wrapSelection(field, open, close) { field = it } },
                 onImage = { imagePicker.launch("image/*") },
                 uploading = uploading,
+                style = toolbarStyle,
+                rows = toolbarRows,
             )
         }
     }

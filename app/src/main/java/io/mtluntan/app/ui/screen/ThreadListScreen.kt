@@ -37,18 +37,21 @@ fun ThreadListScreen(app: MTLuntanApp, nav: NavHostController, fid: Long, boardN
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
+    var exhausted by remember { mutableStateOf(false) }
+
     suspend fun load(reset: Boolean) {
         loading = true
         if (reset) items.clear()
         try {
             val list = app.forum.forumThreads(fid, page)
-            if (reset) items.addAll(list) else if (list.isNotEmpty()) items.addAll(list)
+            if (reset) { items.clear(); items.addAll(list) } else if (list.isNotEmpty()) items.addAll(list)
+            if (list.isEmpty()) exhausted = true
             error = ""
         } catch (e: Exception) { error = e.message ?: "加载失败" }
         loading = false
     }
 
-    LaunchedEffect(Unit) { load(true) }
+LaunchedEffect(Unit) { exhausted = false; load(true) }
 
     Scaffold(
         topBar = {
@@ -80,6 +83,7 @@ fun ThreadListScreen(app: MTLuntanApp, nav: NavHostController, fid: Long, boardN
                         if (!loading) { page++; scope.launch { load(false) } }
                     },
                     loading = loading,
+                    exhausted = exhausted,
                 )
             }
         }

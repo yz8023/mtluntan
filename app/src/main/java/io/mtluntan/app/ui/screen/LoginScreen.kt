@@ -93,50 +93,40 @@ fun LoginScreen(app: MTLuntanApp, nav: NavHostController) {
         hint = "已登录，正在确认账号信息…"
         scope.launch(Dispatchers.IO) {
             try {
-                // ① 是不是已经加过的账号？（同一设备同一账号的 *_auth 稳定不变）
-                val known = app.auth.accountForCookie(cookies)
-                if (known != null) {
-                    app.auth.importStaged(
-                        cookieString = cookies,
-                        username = known.username,
-                        uid = known.uid,
-                        nickname = known.nickname,
-                        avatar = known.avatarUrl,
-                    )
-                    app.auth.endImport()
-                    withContext(Dispatchers.Main) {
-                        CopyUtil.toast(app, "这个账号已在列表里：${known.displayName}（已刷新会话）")
-                        nav.popBackStack()
-                    }
-                    return@launch
-                }
-
-                // ② 新账号：临时会话 + 个人页，由服务端告诉我们「这是谁」
+                // ① 临时会话 + 个人页，由服务端告诉我们「这是谁」
                 app.auth.beginImport()
                 app.auth.stagePendingCookies(cookies)
                 val profile = app.forum.identityOf(app.auth.pendingClient())
-                val username = profile.username.ifBlank { if (profile.uid > 0) "uid_${profile.uid}" else "" }
-                if (username.isBlank()) {
-                    // 不猜名字：交给用户填
-                    withContext(Dispatchers.Main) {
-                        importing = false
-                        hint = "拿不到账号信息，请手动填一个名字（仅本地标识用）"
-                        manualName = ""
-                        manualCookie = cookies
-                    }
-                    return@launch
-                }
-                app.auth.importStaged(
+                val outcome = app.auth.importStaged(
                     cookieString = cookies,
-                    username = username,
+                    username = profile.username,
                     uid = profile.uid,
                     nickname = profile.username,
                     avatar = profile.avatarUrl,
+                    group = profile.groupName,
+                    credits = profile.creditsText,
                 )
-                Refresh.bumpGeneration()
-                withContext(Dispatchers.Main) {
-                    CopyUtil.toast(app, "已添加账号：${profile.username.ifBlank { username }}")
-                    nav.popBackStack()
+                when (outcome) {
+                    is io.mtluntan.app.data.repo.AuthRepository.ImportOutcome.NeedName -> {
+                        // 不猜名字：交给用户填（也绝不生成 uid_0 这种会撞车的名字）
+                        withContext(Dispatchers.Main) {
+                            importing = false
+                            hint = "服务端没返回账号信息，请手动填一个名字（仅本地标识用）"
+                            manualName = ""
+                            manualCookie = cookies
+                        }
+                    }
+                    is io.mtluntan.app.data.repo.AuthRepository.ImportOutcome.Ok -> {
+                        Refresh.bumpGeneration()
+                        withContext(Dispatchers.Main) {
+                            CopyUtil.toast(
+                                app,
+                                if (outcome.isNew) "已添加账号：${outcome.username}"
+                                else "这个账号已在列表里：${outcome.username}（已刷新会话）",
+                            )
+                            nav.popBackStack()
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
@@ -265,13 +255,21 @@ fun LoginScreen(app: MTLuntanApp, nav: NavHostController) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val name = manualName.trim().ifBlank { "account_${System.currentTimeMillis() % 100000}" }
+                    val name = manualName.trim()
+                    if (name.isEmpty()) return@TextButton
                     manualCookie = null
                     scope.launch(Dispatchers.IO) {
-                        app.auth.importStaged(cookie, name, 0, name)
+                        val outcome = app.auth.importStaged(cookie, name, 0, name)
                         Refresh.bumpGeneration()
                         withContext(Dispatchers.Main) {
-                            CopyUtil.toast(app, "已添加：$name")
+                            CopyUtil.toast(
+                                app,
+                                if (outcome is io.mtluntan.app.data.repo.AuthRepository.ImportOutcome.Ok) {
+                                    "已添加：${outcome.username}"
+                                } else {
+                                    "名字不能是「论坛 / 登录 / 纯数字」这类字样，换一个"
+                                },
+                            )
                             nav.popBackStack()
                         }
                     }

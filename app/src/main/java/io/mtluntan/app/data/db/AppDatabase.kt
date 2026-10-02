@@ -46,7 +46,7 @@ import io.mtluntan.app.data.db.entity.UnlockClaimEntity
         AiMessageEntity::class,
         OfflinePostEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +32,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -52,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
 import io.mtluntan.app.ui.components.MtSegmented
+import io.mtluntan.app.ui.components.MtButton
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.ui.theme.OpacityLabels
 import io.mtluntan.app.ui.theme.ThemePresets
@@ -89,6 +94,12 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
     val motionEnabled by app.settings.motionEnabled.collectAsStateWithLifecycle(initialValue = true)
     val motionDamping by app.settings.motionDamping.collectAsStateWithLifecycle(initialValue = 50)
     val autoPagination by app.settings.autoPagination.collectAsStateWithLifecycle(initialValue = true)
+    val toolbarStyle by app.settings.toolbarStyle.collectAsStateWithLifecycle(initialValue = "icon")
+    val toolbarRows by app.settings.toolbarRows.collectAsStateWithLifecycle(initialValue = 2)
+    val replyPreview by app.settings.replyPreview.collectAsStateWithLifecycle(initialValue = true)
+    var crashLog by remember { mutableStateOf("") }
+    var showCrash by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { crashLog = io.mtluntan.app.util.CrashGuard.read(context) }
 
     Scaffold(
         topBar = {
@@ -386,6 +397,35 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
             }
             item {
                 SettingChoice(
+                    title = "快捷工具栏形态",
+                    subtitle = "发帖 / 回复工具条用「文字」还是「图标」",
+                    options = listOf("文字", "图标"),
+                    selected = if (toolbarStyle == "text") "文字" else "图标",
+                    onSelect = { value -> scope.launch { app.settings.setToolbarStyle(if (value == "文字") "text" else "icon") } },
+                )
+            }
+            item {
+                SettingChoice(
+                    title = "工具栏显示行数",
+                    subtitle = "默认 2 行；行数越多每个按钮越大越好点",
+                    options = listOf("1 行", "2 行", "3 行", "4 行"),
+                    selected = "${toolbarRows.coerceIn(1, 4)} 行",
+                    onSelect = { value ->
+                        val n = value.filter { it.isDigit() }.toIntOrNull() ?: 2
+                        scope.launch { app.settings.setToolbarRows(n) }
+                    },
+                )
+            }
+            item {
+                SettingSwitch(
+                    title = "回复实时预览",
+                    subtitle = "边打字边渲染 BBCode 效果，不用手动点预览",
+                    checked = replyPreview,
+                    onChange = { scope.launch { app.settings.setReplyPreview(it) } },
+                )
+            }
+            item {
+                SettingChoice(
                     title = "正文图片显示方式",
                     options = listOf("原位大图", "汇总图廊"),
                     selected = if (imageMode == "gallery") "汇总图廊" else "原位大图",
@@ -501,10 +541,56 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MtButton(
+                            text = if (crashLog.isNotBlank()) "查看崩溃日志" else "崩溃日志（暂无）",
+                            onClick = { showCrash = true },
+                            primary = crashLog.isNotBlank(),
+                        )
+                        if (crashLog.isNotBlank()) {
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = {
+                                io.mtluntan.app.util.CrashGuard.clear(context)
+                                crashLog = ""
+                                CopyUtil.toast(context, "崩溃日志已清空")
+                            }) { Text("清空") }
+                        }
+                    }
+                    if (crashLog.isNotBlank()) {
+                        Text(
+                            "崩溃后会自动记录完整堆栈（含未混淆的类名与行号），反馈问题时把它发来即可定位",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
             }
         }
     }
+
+    if (showCrash) CrashLogDialog(crashLog) { showCrash = false }
+}
+
+@Composable
+private fun CrashLogDialog(text: String, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("崩溃日志") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(text, style = MaterialTheme.typography.labelSmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                io.mtluntan.app.util.CopyUtil.copy(ctx, text, "崩溃日志已复制")
+                onDismiss()
+            }) { Text("复制") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 @Composable

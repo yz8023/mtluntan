@@ -123,14 +123,55 @@ object Parsing {
     }
 
     fun findUid(doc: Document): Long {
+        // Discuz 每个页面都会内联登录态：var discuz_uid = '12345'; 这是最可靠的 uid 来源
         for (a in doc.select("a[href*=\"space&uid=\"]")) {
             val u = UrlUtil.uid(a.attr("href"))
             if (u > 0) return u
         }
         for (a in doc.select("a[href*=\"space-uid-\"]")) {
-            return UrlUtil.uid(a.attr("href"))
+            val uid = UrlUtil.uid(a.attr("href"))
+            if (uid > 0) return uid
+        }
+        return findUidInScripts(doc)
+    }
+
+    /**
+     * 从页面内联脚本里挖登录 uid：
+     * `discuz_uid = '12345'` / `uid = 12345` / `"uid":"12345"`。
+     * 任何登录页都有，所以它是「个人页解析失败」时的兜底身份来源。
+     */
+    fun findUidInScripts(doc: Document): Long {
+        val html = doc.outerHtml()
+        val patterns = listOf(
+            Regex("discuz_uid\\s*=\\s*'?(\\d{1,12})'?"),
+            Regex("\"discuz_uid\"\\s*:\\s*\"?(\\d{1,12})"),
+            Regex("\\buid\\s*=\\s*'?(\\d{1,12})'?\\s*[,;]"),
+        )
+        for (p in patterns) {
+            val m = p.find(html) ?: continue
+            val uid = m.groupValues[1].toLongOrNull() ?: 0
+            if (uid > 0) return uid
         }
         return 0
+    }
+
+    /**
+     * 这一页是不是「未登录 / 需要登录」的页面？
+     *
+     * 用于判断会话是否真的还有效：拿不到 discuz_uid、又出现登录入口的，就是游客页。
+     */
+    fun looksLikeLoginPage(html: String): Boolean {
+        if (html.isBlank()) return true
+        if (findUidInScripts(doc(html)) > 0) return false
+        val markers = listOf(
+            "member.php?mod=logging&action=login",
+            "立即登录",
+            "请先登录",
+            "您需要登录后",
+            "登录后才能",
+            "action=login",
+        )
+        return markers.any { html.contains(it) } && !html.contains("logout")
     }
 
     fun findFid(doc: Document): Long {

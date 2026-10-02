@@ -57,6 +57,10 @@ object ThreadListParser : BaseParser() {
                 ?: li.select("a[href*=\"forum-\"], a[href*=\"forumdisplay\"]").firstOrNull()
             val avatarHref = li.select(".forumlist_li_top .top_tximg, a[href*=\"space&uid=\"]").firstOrNull()?.attr("href")
             val authorEl = li.select(".forumlist_li_top .top_user, .top_user, a[href*=\"space-username-\"]").firstOrNull()
+            // 用户组 / 等级：模板不同位置不同，抓不到就留空（不要瞎填）
+            val levelEl = li.select(
+                ".comiis_xznalist_top .kmlev, .forumlist_li_top .kmlev, .comiis_uinfo_gr, .top_user_group, .kmlevs.kmlv"
+            ).firstOrNull()
             val statLis = li.select(".comiis_xznalist_bottom li .comiis_tm")
             var likes = 0; var replies = 0; var views = 0
             if (statLis.size > 0) likes = TextUtil.intOf(statLis[0].text())
@@ -76,6 +80,7 @@ object ThreadListParser : BaseParser() {
                 summary = summaryEl?.let { Parsing.cleanText(it) } ?: "",
                 authorUid = UrlUtil.uid(avatarHref),
                 authorName = Parsing.text(authorEl),
+                authorLevel = levelEl?.let { Parsing.text(it) }.orEmpty(),
                 avatarUrl = UrlUtil.uid(avatarHref).let { if (it > 0) avatarOf(it) else "" },
                 boardId = UrlUtil.fid(boardEl?.attr("href")),
                 boardName = Parsing.text(boardEl)

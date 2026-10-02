@@ -41,6 +41,9 @@ class AppSettings(private val context: Context) {
         val KEY_MOTION_DAMPING = intPreferencesKey("motion_damping")    // 0..100
         val KEY_CUSTOM_SEED = longPreferencesKey("custom_seed")         // 自定义种子色 ARGB
         val KEY_AUTO_PAGINATION = booleanPreferencesKey("auto_pagination") // 评论自动下一页
+        val KEY_TOOLBAR_STYLE = stringPreferencesKey("bbc_toolbar_style")   // text 文字 | icon 图标
+        val KEY_TOOLBAR_ROWS = intPreferencesKey("bbc_toolbar_rows")        // 工具条显示行数，默认 2
+        val KEY_REPLY_PREVIEW = booleanPreferencesKey("bbc_reply_preview")  // 回复时实时预览
 
         // ---- 网络与阅读 ----
         val KEY_DESKTOP_MODE = booleanPreferencesKey("desktop_mode")
@@ -105,6 +108,12 @@ class AppSettings(private val context: Context) {
     val motionDamping: Flow<Int> = context.dataStore.data.map { it[KEY_MOTION_DAMPING] ?: 50 }
     val customSeed: Flow<Long> = context.dataStore.data.map { it[KEY_CUSTOM_SEED] ?: 0L }
     val autoPagination: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_PAGINATION] ?: true }
+    /** 快捷工具栏形态：文字 / 图标。 */
+    val toolbarStyle: Flow<String> = context.dataStore.data.map { it[KEY_TOOLBAR_STYLE] ?: "icon" }
+    /** 工具条显示行数（默认 2 行）。 */
+    val toolbarRows: Flow<Int> = context.dataStore.data.map { it[KEY_TOOLBAR_ROWS] ?: 2 }
+    /** 回复时实时预览。 */
+    val replyPreview: Flow<Boolean> = context.dataStore.data.map { it[KEY_REPLY_PREVIEW] ?: true }
 
     val desktopMode: Flow<Boolean> = context.dataStore.data.map { it[KEY_DESKTOP_MODE] ?: false }
     val downloadMode: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_MODE] ?: "inapp" }
@@ -173,6 +182,9 @@ class AppSettings(private val context: Context) {
     suspend fun setMotionDamping(v: Int) = context.dataStore.edit { it[KEY_MOTION_DAMPING] = v.coerceIn(0, 100) }
     suspend fun setCustomSeed(v: Long) = context.dataStore.edit { it[KEY_CUSTOM_SEED] = v }
     suspend fun setAutoPagination(v: Boolean) = context.dataStore.edit { it[KEY_AUTO_PAGINATION] = v }
+    suspend fun setToolbarStyle(v: String) = context.dataStore.edit { it[KEY_TOOLBAR_STYLE] = if (v == "text") "text" else "icon" }
+    suspend fun setToolbarRows(v: Int) = context.dataStore.edit { it[KEY_TOOLBAR_ROWS] = v.coerceIn(1, 4) }
+    suspend fun setReplyPreview(v: Boolean) = context.dataStore.edit { it[KEY_REPLY_PREVIEW] = v }
 
     suspend fun setDesktopMode(v: Boolean) = context.dataStore.edit { it[KEY_DESKTOP_MODE] = v }
     suspend fun setDownloadMode(v: String) = context.dataStore.edit { it[KEY_DOWNLOAD_MODE] = v }

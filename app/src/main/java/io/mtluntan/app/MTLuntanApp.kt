@@ -64,6 +64,7 @@ class MTLuntanApp : android.app.Application() {
         ai = AiRepository(this)
         autoReply = AutoReplyEngine(this)
 
+        io.mtluntan.app.util.CrashGuard.install(this)
         Notifier.ensureChannel(this)
         setupWorkers()
         restoreActiveAccount()

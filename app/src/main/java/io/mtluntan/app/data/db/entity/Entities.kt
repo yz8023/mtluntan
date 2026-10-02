@@ -11,6 +11,8 @@ data class AccountEntity(
     val avatarUrl: String = "",
     val cookieString: String = "",
     val creditsText: String = "",
+    /** 用户组 / 等级文字（个人页解析），账号卡片直接显示。 */
+    val groupName: String = "",
     val expired: Boolean = false,
     val signDays: Int = 0,
     val lastSignedAt: Long = 0,

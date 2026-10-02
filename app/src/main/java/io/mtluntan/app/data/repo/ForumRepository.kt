@@ -276,18 +276,47 @@ class ForumRepository(private val net: Net) {
      * 用**指定会话**识别「我」是谁：请求个人页，由服务端返回真实 uid / 用户名。
      * 登录导入、检测会话都走这里，绝不从 Cookie 名字猜身份。
      */
+    /**
+     * 用**指定会话**识别「我」是谁（登录导入 / 检测会话都走这里）。
+     *
+     * 三级兜底，任何一级拿到身份就返回：
+     *   1. 移动版个人页 `home.php?mod=space&do=profile&mobile=2`（首选，信息最全）
+     *   2. PC 版个人页（移动版模板被换 / 被防护拦时）
+     *   3. 索引页里的内联登录态 `discuz_uid = '12345'`（只保证 uid，名字留给用户填）
+     *
+     * 注意：**不猜名字**。拿到的用户名要过 [UserPagesParser.sanitizeUsername]，
+     * 页面标题 / 站点名这种「所有账号都一样」的字符串一律丢弃。
+     */
     suspend fun identityOf(client: IsolatedClient): UserProfile = withContext(Dispatchers.IO) {
-        // 个人页在刚登录时偶尔要第二次才带全信息，重试一次
         var profile = UserProfile()
         repeat(2) { attempt ->
             val html = runCatching { client.get(ApiUris.space(0, doWhat = "profile")) }.getOrDefault("")
             if (html.isNotBlank()) {
                 profile = SocialParser.enrichProfile(UserPagesParser.parseProfile(html), html)
-                if (profile.uid > 0 && profile.username.isNotBlank()) return@withContext profile
+                if (profile.uid > 0 || profile.username.isNotBlank()) return@withContext profile
+                // 会话是死的（游客页）→ 立刻换 PC 页试试
+                if (Parsing.looksLikeLoginPage(html)) return@withContext identityFromFallback(client, html)
             }
             if (attempt == 0) delay(900)
         }
-        profile
+        identityFromFallback(client, "")
+    }
+
+    /** 个人页拿不到身份时的兜底：PC 个人页 → 内联 discuz_uid。 */
+    private suspend fun identityFromFallback(client: IsolatedClient, mobileHtml: String): UserProfile {
+        val pcHtml = runCatching {
+            client.get(ApiUris.SITE + "/home.php?mod=space&do=profile")
+        }.getOrDefault("")
+        if (pcHtml.isNotBlank()) {
+            val pc = SocialParser.enrichProfile(UserPagesParser.parseProfile(pcHtml), pcHtml)
+            if (pc.uid > 0 || pc.username.isNotBlank()) return pc
+        }
+        // 最后一招：任何登录页都能在脚本里挖到 discuz_uid
+        val anyHtml = mobileHtml.ifBlank {
+            runCatching { client.get(ApiUris.SITE + "/forum.php?mobile=2") }.getOrDefault("")
+        }
+        val uid = Parsing.findUidInScripts(Parsing.doc(anyHtml))
+        return if (uid > 0) UserProfile(uid = uid, avatarUrl = UserPagesParser.avatarOf(uid)) else UserProfile()
     }
 
     suspend fun myProfile(): UserProfile = withContext(Dispatchers.IO) {

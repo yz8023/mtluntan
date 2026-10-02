@@ -74,6 +74,8 @@ class AuthRepository(
         cookieString: String,
         avatar: String = "",
         nickname: String = "",
+        group: String = "",
+        credits: String = "",
         password: String? = null,
     ) = withContext(Dispatchers.IO) {
         cookieRepo.importCookieString(cookieString, username)
@@ -85,7 +87,8 @@ class AuthRepository(
                 nickname = nickname.ifEmpty { old?.nickname.orEmpty() },
                 avatarUrl = avatar.ifEmpty { old?.avatarUrl.orEmpty() },
                 cookieString = cookieString,
-                creditsText = old?.creditsText.orEmpty(),
+                creditsText = credits.ifEmpty { old?.creditsText.orEmpty() },
+                groupName = group.ifEmpty { old?.groupName.orEmpty() },
                 expired = false,
                 signDays = old?.signDays ?: 0,
                 lastSignedAt = old?.lastSignedAt ?: 0,
@@ -129,20 +132,75 @@ class AuthRepository(
     fun pendingClient(): IsolatedClient = IsolatedClient(cookieRepo, PENDING_HANDLE)
 
     /** 身份识别失败时用户手填的名字 → 保证也能入库（名字只用于本地标识）。 */
+    /**
+     * 导入结果。
+     *
+     * 关键点：**导入失败绝不硬塞一个名字**。
+     * 老实现拿「页面标题 / uid_0 / account_时间戳」当用户名，两个账号很容易同名，
+     * 于是 username 主键一 REPLACE，第一个账号就被第二个覆盖了 ——
+     * 这就是「加一个账号就把上一个删掉」的原因。
+     */
+    sealed class ImportOutcome {
+        /** 服务端身份 + 用户手填的名字都拿不到，需要调用方问用户。 */
+        object NeedName : ImportOutcome()
+        /** 成功。isNew=false 表示这是已有账号，只刷新了会话。 */
+        data class Ok(val username: String, val isNew: Boolean) : ImportOutcome()
+    }
+
+    /**
+     * 用临时会话里已经确认好的身份入库。
+     *
+     * @param username 服务端确认的用户名（可能为空 → 用 uid 兜底）
+     * @param uid      服务端确认的 uid（0 = 未知）
+     */
     suspend fun importStaged(
         cookieString: String,
         username: String,
         uid: Long = 0,
         nickname: String = "",
         avatar: String = "",
+        group: String = "",
+        credits: String = "",
         password: String? = null,
-    ) {
-        val real = resolveUsername(username, uid)
-        importSession(real, uid, cookieString, avatar, nickname, password)
-        cookieRepo.clearForAccount(PENDING_HANDLE)
+    ): ImportOutcome = withContext(Dispatchers.IO) {
+        val cleanName = io.mtluntan.app.data.parser.UserPagesParser.sanitizeUsername(username)
+        val cleanNick = io.mtluntan.app.data.parser.UserPagesParser.sanitizeUsername(nickname)
+        // 连 uid 都没有 → 无法确定这是谁，交给上层问用户（绝不生成假名字）
+        if (cleanName.isEmpty() && uid <= 0 && cleanNick.isEmpty()) return@withContext ImportOutcome.NeedName
+
+        // 名字优先级：服务端用户名 → uid_<uid> → 用户填的昵称（都为空的情况上面已经拦掉）
+        var handle = when {
+            cleanName.isNotEmpty() -> cleanName
+            uid > 0 -> "uid_$uid"
+            else -> cleanNick
+        }
+        var existing = db.accountDao().byUsername(handle)
+        // 同名但 uid 不同 = 撞名的两个账号 → 用 uid 当唯一标识，绝不覆盖
+        if (existing != null && uid > 0 && existing.uid > 0 && existing.uid != uid) {
+            handle = "uid_$uid"
+            existing = db.accountDao().byUsername(handle)
+        }
+        // 已经有同 uid 的账号 → 认为就是它（比如手动导入过一次）
+        if (existing == null && uid > 0) {
+            val same = db.accountDao().getAll().firstOrNull { it.uid == uid && it.username != handle }
+            if (same != null && cleanName.isNotEmpty() && same.username == cleanName) existing = same
+        }
+
+        val isNew = existing == null
+        importSession(
+            username = handle,
+            uid = uid,
+            cookieString = cookieString,
+            avatar = avatar,
+            nickname = cleanNick.ifEmpty { cleanName },
+            group = group,
+            credits = credits,
+            password = password,
+        )
+        LogCenter.ok(LogTag.RUN, if (isNew) "新增账号：$handle (uid=$uid)" else "刷新账号会话：$handle")
+        ImportOutcome.Ok(handle, isNew)
     }
 
-    /** 用 uid / 昵称拼一个不会和别人撞车的本地用户名。 */
     private fun resolveUsername(username: String, uid: Long): String {
         val trimmed = username.trim()
         if (trimmed.isNotEmpty() && !trimmed.startsWith("__")) return trimmed
@@ -217,6 +275,7 @@ class AuthRepository(
         nickname: String = "",
         avatar: String = "",
         credits: String = "",
+        group: String = "",
         signDays: Int = 0,
     ) = withContext(Dispatchers.IO) {
         val cur = db.accountDao().byUsername(username) ?: return@withContext
@@ -226,6 +285,7 @@ class AuthRepository(
                 nickname = nickname.ifEmpty { cur.nickname },
                 avatarUrl = avatar.ifEmpty { cur.avatarUrl },
                 creditsText = credits.ifEmpty { cur.creditsText },
+                groupName = group.ifEmpty { cur.groupName },
                 signDays = if (signDays > 0) signDays else cur.signDays,
             )
         )
@@ -239,8 +299,9 @@ class AuthRepository(
         uid: Long,
         nickname: String,
         avatar: String,
+        group: String = "",
     ) = withContext(Dispatchers.IO) {
-        db.accountDao().updateProfile(username, uid, nickname.trim(), avatar.trim())
+        db.accountDao().updateProfile(username, uid, nickname.trim(), avatar.trim(), group.trim())
         LogCenter.log(LogTag.RUN, "编辑账号资料：$username")
     }
 
@@ -360,6 +421,7 @@ class AuthRepository(
         cookieString = cookieString,
         expired = expired,
         creditsText = creditsText,
+        groupName = groupName,
         isActive = username == SessionHolder.activeAccount.value,
         nickname = nickname,
         lastCheckIn = if (lastSignedAt > 0) {

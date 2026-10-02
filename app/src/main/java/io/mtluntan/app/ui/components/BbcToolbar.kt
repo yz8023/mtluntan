@@ -2,7 +2,6 @@ package io.mtluntan.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,14 +43,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.mtluntan.app.util.GradientText
 
 /**
  * BBCode 工具条：**发帖编辑器与帖子页回复面板共用同一套**。
  *
- * 之前只有编辑器里有工具条，快速回复只能发纯文本；现在抽成公共组件，
- * 回复面板也能加粗 / 上色 / 插图，行为完全一致（少维护一份代码）。
+ * 用户要求的两点可配置项（设置 → 外观 / 回复）：
+ *  - `style`：`text` 文字形态 / `icon` 图标形态；
+ *  - `rows`：显示几行，**默认 2 行**，按钮按行等分（不滚动、不挤成一条）。
+ *
+ * 默认 2 行：第一行是高频的加粗/斜体/下划线/代码/引用/隐藏，
+ * 第二行是颜色/渐变/链接/图片/标签/编辑器。行数变了自动重新均分。
  */
 @Composable
 fun BbcToolbar(
@@ -60,35 +64,56 @@ fun BbcToolbar(
     onImage: (() -> Unit)? = null,
     uploading: Boolean = false,
     onOpenFullEditor: (() -> Unit)? = null,
+    style: String = "icon",
+    rows: Int = 2,
 ) {
     var colorPicker by remember { mutableStateOf(false) }
     var gradientPicker by remember { mutableStateOf(false) }
     var tagPicker by remember { mutableStateOf(false) }
+    val textStyle = style == "text"
+    val rowCount = rows.coerceIn(1, 4)
+
+    // 动作集中成一个列表，按行数等分；图标 / 文字只影响呈现方式
+    val actions: List<BbcAction> = buildList {
+        add(BbcAction("加粗", "B", Icons.Filled.TextFields) { onWrap("[b]", "[/b]") })
+        add(BbcAction("斜体", "I", Icons.Filled.TextFields) { onWrap("[i]", "[/i]") })
+        add(BbcAction("下划线", "U", Icons.Filled.TextFields) { onWrap("[u]", "[/u]") })
+        add(BbcAction("代码", "代码", Icons.Filled.Code) { onWrap("[code]", "[/code]") })
+        add(BbcAction("引用", "引用", Icons.Filled.Tag) { onWrap("[quote]", "[/quote]") })
+        add(BbcAction("隐藏", "隐藏", Icons.Filled.Tag) { onWrap("[hide]", "[/hide]") })
+        add(BbcAction("颜色", "颜色", Icons.Filled.Palette) { colorPicker = true })
+        add(BbcAction("渐变字", "渐变", Icons.Filled.ColorLens) { gradientPicker = true })
+        add(BbcAction("链接", "链接", Icons.Filled.Send) { onWrap("[url]", "[/url]") })
+        if (onImage != null) {
+            add(BbcAction(if (uploading) "上传中" else "图片", "图片", Icons.Filled.Image) { onImage() })
+        }
+        add(BbcAction("更多标签", "标签", Icons.Filled.Slideshow) { tagPicker = true })
+        if (onOpenFullEditor != null) {
+            add(BbcAction("完整编辑器", "编辑器", Icons.Filled.TextFields) { onOpenFullEditor() })
+        }
+    }
+    val perRow = ((actions.size + rowCount - 1) / rowCount).coerceAtLeast(1)
+    val chunks = actions.chunked(perRow)
 
     Surface(tonalElevation = 2.dp, modifier = modifier) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ToolButton(Icons.Filled.TextFields, "B", "加粗") { onWrap("[b]", "[/b]") }
-            ToolButton(Icons.Filled.TextFields, "I", "斜体") { onWrap("[i]", "[/i]") }
-            ToolButton(Icons.Filled.TextFields, "U", "下划线") { onWrap("[u]", "[/u]") }
-            ToolButton(Icons.Filled.Code, null, "代码") { onWrap("[code]", "[/code]") }
-            ToolButton(Icons.Filled.Tag, null, "引用") { onWrap("[quote]", "[/quote]") }
-            ToolButton(Icons.Filled.Tag, null, "隐藏") { onWrap("[hide]", "[/hide]") }
-            ToolButton(Icons.Filled.Palette, null, "颜色") { colorPicker = true }
-            ToolButton(Icons.Filled.ColorLens, null, "渐变字") { gradientPicker = true }
-            ToolButton(Icons.Filled.Send, null, "链接") { onWrap("[url]", "[/url]") }
-            if (onImage != null) {
-                ToolButton(Icons.Filled.Image, null, if (uploading) "上传中" else "图片") { onImage() }
-            }
-            ToolButton(Icons.Filled.Slideshow, null, "更多标签") { tagPicker = true }
-            if (onOpenFullEditor != null) {
-                ToolButton(Icons.Filled.TextFields, "完整编辑器", "完整编辑器") { onOpenFullEditor() }
+            chunks.forEach { chunk ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    chunk.forEach { action ->
+                        BbcToolButton(action = action, textStyle = textStyle, modifier = Modifier.weight(1f))
+                    }
+                    // 最后一行不满时补空位：每行按钮宽度一致，不会忽宽忽窄
+                    repeat(perRow - chunk.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
     }
@@ -113,23 +138,35 @@ fun BbcToolbar(
     }
 }
 
+/** 工具条上的一个动作。 */
+private class BbcAction(
+    val desc: String,
+    val label: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit,
+)
+
+/** 单个按钮：文字形态显示文字，图标形态显示图标（都带无障碍描述）。 */
 @Composable
-private fun ToolButton(
-    icon: ImageVector,
-    label: String?,
-    desc: String,
-    onClick: () -> Unit,
-) {
+private fun BbcToolButton(action: BbcAction, textStyle: Boolean, modifier: Modifier = Modifier) {
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = modifier.heightIn(min = 30.dp).clickable(onClick = action.onClick),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Icon(icon, contentDescription = desc, modifier = Modifier.size(16.dp))
-            if (label != null) {
-                Spacer(Modifier.width(4.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium)
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (textStyle) {
+                Text(
+                    action.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Icon(action.icon, contentDescription = action.desc, modifier = Modifier.size(17.dp))
             }
         }
     }

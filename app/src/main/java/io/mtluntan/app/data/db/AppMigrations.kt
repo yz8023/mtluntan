@@ -28,9 +28,14 @@ object AppMigrations {
         override fun migrate(db: SupportSQLiteDatabase) = converge(db)
     }
 
-    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    /** v3 → v4：账号表加「用户组」列（多账号列表要显示账号内容信息）。 */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) = converge(db)
+    }
 
-    /** 把任意旧版本的库补齐成 v3 的结构（幂等）。 */
+    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+
+    /** 把任意旧版本的库补齐成当前（v4）的结构（幂等）。 */
     private fun converge(db: SupportSQLiteDatabase) {
         NEW_TABLES.forEach { t ->
             create(db, t.name, t.sql)
@@ -88,6 +93,7 @@ object AppMigrations {
             "avatarUrl" to "TEXT NOT NULL DEFAULT ''",
             "cookieString" to "TEXT NOT NULL DEFAULT ''",
             "creditsText" to "TEXT NOT NULL DEFAULT ''",
+            "groupName" to "TEXT NOT NULL DEFAULT ''",
             "expired" to "INTEGER NOT NULL DEFAULT 0",
             "signDays" to "INTEGER NOT NULL DEFAULT 0",
             "lastSignedAt" to "INTEGER NOT NULL DEFAULT 0",

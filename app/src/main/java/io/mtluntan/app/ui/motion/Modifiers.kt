@@ -17,7 +17,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -41,12 +40,30 @@ import kotlin.math.sin
  *  - [mtSpecular]      跟手指的高光（玻璃面板的交互反馈）
  */
 
+/**
+ * ⚠️ 为什么这里不再用 `Modifier.composed`：
+ *
+ * pressScale / impactShake / mtSpecular 以前都是 `Modifier.composed { … }`。
+ * `composed` 把 `remember` / `LaunchedEffect` 放进一个延迟到布局阶段才执行的小组合里；
+ * 这个 Modifier 挂在会被**复用**的列表项上（我们每个卡片、每个楼层都挂了）时，
+ * 组合的「组结构」可能错位，表现就是社区里很典型的那条崩溃：
+ *
+ *     FATAL EXCEPTION: main
+ *     java.lang.ArrayIndexOutOfBoundsException: length=0; index=-5
+ *       at androidx.compose.runtime.ComposerImpl.t(…)      ← 混淆后就是 `l0.r.t`
+ *       （mapping 还原：ComposerImpl.end / SlotWriter.getParent / SlotTableKt.key…）
+ *
+ * 现在改成普通的 **@Composable Modifier 工厂函数**：效果一样，
+ * 但走正常组合流程，没有延迟小组合，也就没有这个崩溃面。
+ */
+
 /** 按压缩放：0.94 是「有重量但不过火」的默认值。 */
+@Composable
 fun Modifier.pressScale(
     interactionSource: InteractionSource,
     pressedScale: Float = 0.94f,
     enabled: Boolean = true,
-): Modifier = composed {
+): Modifier {
     val pressed by interactionSource.collectIsPressedAsState()
     val target = if (pressed && enabled && Motion.enabled.value) pressedScale else 1f
     val scale by animateFloatAsState(
@@ -54,7 +71,7 @@ fun Modifier.pressScale(
         animationSpec = Motion.Press,
         label = "pressScale",
     )
-    graphicsLayer {
+    return this.graphicsLayer {
         scaleX = scale
         scaleY = scale
     }
@@ -64,18 +81,19 @@ fun Modifier.pressScale(
  * 冲击抖动：两轴不同频率 + 线性衰减包络，才是「冲击」而不是「糊成一团」。
  * 传 null 不触发。
  */
+@Composable
 fun Modifier.impactShake(
     trigger: Any?,
     amplitude: Float = 9f,
     durationMs: Int = 300,
-): Modifier = composed {
+): Modifier {
     val progress = remember { Animatable(1f) }
     LaunchedEffect(trigger) {
         if (trigger == null || !Motion.enabled.value) return@LaunchedEffect
         progress.snapTo(0f)
         progress.animateTo(1f, tween(durationMs, easing = LinearEasing))
     }
-    graphicsLayer {
+    return this.graphicsLayer {
         val p = progress.value
         val envelope = (1f - p).coerceAtLeast(0f)
         val seconds = p * durationMs / 1000f
@@ -146,7 +164,8 @@ fun StaggeredReveal(
  * 有两层：铺满的白色薄雾 + 以手指为圆心的径向「镜头光」，
  * 都按按压进度淡入淡出，所以它不会「啪」地出现。
  */
-fun Modifier.mtSpecular(interactionSource: InteractionSource, radiusScale: Float = 0.72f): Modifier = composed {
+@Composable
+fun Modifier.mtSpecular(interactionSource: InteractionSource, radiusScale: Float = 0.72f): Modifier {
     val pressed by interactionSource.collectIsPressedAsState()
     val progress by animateFloatAsState(
         targetValue = if (pressed && Motion.enabled.value) 1f else 0f,
@@ -162,7 +181,7 @@ fun Modifier.mtSpecular(interactionSource: InteractionSource, radiusScale: Float
             }
         }
     }
-    pointer.drawWithContent {
+    return pointer.drawWithContent {
         if (progress > 0f) {
             drawRect(Color.White.copy(alpha = 0.07f * progress), blendMode = BlendMode.Plus)
             drawCircle(

@@ -7,6 +7,8 @@ data class ThreadItem(
     val summary: String = "",
     val authorUid: Long = 0,
     val authorName: String = "",
+    /** 发布人等级 / 用户组（列表页能解析到才填，解析不到为空）。 */
+    val authorLevel: String = "",
     val avatarUrl: String = "",
     val boardId: Long = 0,
     val boardName: String = "",
@@ -94,6 +96,8 @@ data class ThreadDetail(
 /** A user profile. */
 data class UserProfile(
     val uid: Long = 0,
+    /** 「积分 12 好评 0 金币 34」这类整块文字，账号卡片直接显示。 */
+    val creditsText: String = "",
     val username: String = "",
     val avatarUrl: String = "",
     val groupName: String = "",
@@ -122,6 +126,8 @@ data class Account(
     var lastCheckIn: String = "",
     var lastCheckInOk: Boolean = false,
     val creditsText: String = "",
+    /** 用户组 / 等级（个人页「用户组: xxx」）。 */
+    val groupName: String = "",
     /** 连续签到天数（签到插件回报）。 */
     val signDays: Int = 0,
     /** 参与定时/一键签到。 */
@@ -283,9 +289,10 @@ data class BadgeCounts(
 /** 账号显示名：昵称优先，其次用户名（昵称拿不到时不要显示空白）。 */
 val Account.displayName: String get() = nickname.ifBlank { username }
 
-/** 账号副标题：UID / 签到状态一行说明。 */
+/** 账号副标题：用户组 / UID / 签到状态一行说明。 */
 fun Account.subtitle(): String = buildString {
-    if (uid > 0) append("UID $uid")
+    if (groupName.isNotBlank()) append(groupName)
+    if (uid > 0) { if (isNotEmpty()) append(" · "); append("UID $uid") }
     if (signDays > 0) { if (isNotEmpty()) append(" · "); append("连续签到 $signDays 天") }
     if (lastSignReward.isNotBlank()) { if (isNotEmpty()) append(" · "); append(lastSignReward) }
 }

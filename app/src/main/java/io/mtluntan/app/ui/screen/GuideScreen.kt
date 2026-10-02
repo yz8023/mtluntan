@@ -45,13 +45,16 @@ fun GuideScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer: 
     var jumpOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    var exhausted by remember(view) { mutableStateOf(false) }
+
     fun load(reset: Boolean) {
         scope.launch {
             loading = true
             if (reset) { items.clear() }
             try {
                 val list = app.forum.guide(view, page)
-                if (reset) items.addAll(list) else if (list.isNotEmpty()) items.addAll(list)
+                if (reset) { items.clear(); items.addAll(list) } else if (list.isNotEmpty()) items.addAll(list)
+                if (list.isEmpty()) exhausted = true
                 error = ""
             } catch (e: Exception) {
                 error = e.message ?: "加载失败"
@@ -62,6 +65,7 @@ fun GuideScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer: 
 
     LaunchedEffect(view) {
         page = 1
+        exhausted = false
         load(true)
     }
 
@@ -69,7 +73,7 @@ fun GuideScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer: 
     LaunchedEffect(defaultView) { if (defaultView.isNotBlank() && defaultView != view) view = defaultView }
 
     // 点当前底栏 Tab / 切号 → 回到第一页重新拉
-    LaunchedEffect(tabTick, generation) { if (tabTick + generation > 0) { page = 1; load(true) } }
+    LaunchedEffect(tabTick, generation) { if (tabTick + generation > 0) { page = 1; exhausted = false; load(true) } }
 
     Scaffold(
         topBar = {
@@ -95,6 +99,7 @@ fun GuideScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer: 
                     onOpen = { item -> nav?.navigate(Routes.thread(item.threadId)) },
                     onLoadMore = { if (!loading) { page++; load(false) } },
                     loading = loading,
+                    exhausted = exhausted,
                 )
             }
         }
