@@ -46,8 +46,8 @@ import io.mtluntan.app.data.db.entity.UnlockClaimEntity
         AiMessageEntity::class,
         OfflinePostEntity::class,
     ],
-    version = 2,
-    exportSchema = false,
+    version = 3,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
@@ -73,7 +73,15 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "mtluntan.db",
-                ).fallbackToDestructiveMigration().build().also { instance = it }
+                )
+                    // v1 → v2 → v3 都有显式迁移：
+                    // v2 那次把 7 张新表漏在 schema 外（只有 6 张表被创建），
+                    // 直接 destructive 会把账号 / 历史 / 草稿全部清空，
+                    // 所以这里必须把表补齐而不是删库。
+                    .addMigrations(*AppMigrations.ALL)
+                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .build()
+                    .also { instance = it }
             }
     }
 }

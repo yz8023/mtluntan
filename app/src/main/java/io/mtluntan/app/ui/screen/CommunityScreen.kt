@@ -21,16 +21,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
 import io.mtluntan.app.domain.model.Forum
 import io.mtluntan.app.domain.model.ForumCategory
+import io.mtluntan.app.ui.components.MtButton
+import io.mtluntan.app.ui.components.MtCard
+import io.mtluntan.app.ui.components.MtSectionHeader
 import io.mtluntan.app.ui.navigation.Routes
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,44 +50,56 @@ fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDraw
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(tabTick, generation) {
+    suspend fun load() {
         loading = true
         try {
             categories = app.forum.forumIndex()
-            error = ""
+            error = if (categories.isEmpty()) "板块列表是空的，点右上角刷新试试" else ""
         } catch (e: Exception) {
             error = e.message ?: "加载失败"
         }
         loading = false
     }
 
+    LaunchedEffect(tabTick, generation) { load() }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("社区") },
                 navigationIcon = { IconButton(onClick = onOpenDrawer) { Icon(Icons.Filled.Menu, "菜单") } },
-                actions = { IconButton(onClick = { nav?.navigate(Routes.SEARCH) }) { Icon(Icons.Filled.Search, "搜索") } },
+                actions = {
+                    IconButton(onClick = { scope.launch { load() } }) { Icon(Icons.Filled.Refresh, "刷新") }
+                    IconButton(onClick = { nav?.navigate(Routes.SEARCH) }) { Icon(Icons.Filled.Search, "搜索") } 
+                },
             )
         },
     ) { pad ->
         Column(modifier = Modifier.fillMaxSize().padding(pad)) {
             when {
-                loading -> LoadingBox()
-                error.isNotEmpty() && categories.isEmpty() -> MessageBox(error)
+                loading && categories.isEmpty() -> LoadingBox()
+                error.isNotEmpty() && categories.isEmpty() -> Column {
+                    MessageBox(error)
+                    MtButton(
+                        text = "重新加载",
+                        onClick = { scope.launch { load() } },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    categories.forEach { category ->
-                        item(key = "cat-${category.id}") {
-                            Text(
+                    // 修闪退：分组 id 在解析结果里常常是 0，用「下标+名字」做 key 才不会撞车
+                    // （LazyColumn 的 key 重复直接抛异常 → 底部 Tab 一进就崩）
+                    categories.forEachIndexed { catIndex, category ->
+                        item(key = "cat-$catIndex-${category.name}") {
+                            MtSectionHeader(
                                 text = category.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
-                                textAlign = TextAlign.Start,
+                                modifier = Modifier.padding(start = 10.dp, end = 10.dp),
                             )
                         }
-                        items(category.forums, key = { "cat-${category.id}-${it.id}" }) { forum ->
+                        items(
+                            items = category.forums,
+                            key = { forum -> "forum-$catIndex-${forum.id}-${forum.name}" },
+                        ) { forum ->
                             ForumRow(forum) {
                                 nav?.navigate(Routes.forum(forum.id, forum.name))
                             }
@@ -98,9 +113,10 @@ fun CommunityScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDraw
 
 @Composable
 private fun ForumRow(forum: Forum, onOpen: () -> Unit) {
-    Card(
+    MtCard(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+        padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             RowText(

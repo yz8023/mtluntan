@@ -6,6 +6,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+ksp {
+    // 导出 Room schema：迁移脚本要按它生成，保证和 Room 期望的表结构一字不差
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 if (keystorePropertiesFile.exists()) {

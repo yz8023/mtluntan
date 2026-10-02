@@ -278,3 +278,14 @@ data class BadgeCounts(
 ) {
     val total: Int get() = notices + pms
 }
+
+
+/** 账号显示名：昵称优先，其次用户名（昵称拿不到时不要显示空白）。 */
+val Account.displayName: String get() = nickname.ifBlank { username }
+
+/** 账号副标题：UID / 签到状态一行说明。 */
+fun Account.subtitle(): String = buildString {
+    if (uid > 0) append("UID $uid")
+    if (signDays > 0) { if (isNotEmpty()) append(" · "); append("连续签到 $signDays 天") }
+    if (lastSignReward.isNotBlank()) { if (isNotEmpty()) append(" · "); append(lastSignReward) }
+}

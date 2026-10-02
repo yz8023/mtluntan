@@ -55,18 +55,25 @@ class SignInManager(
         }
     }
 
-    /** 单个账号签到。 */
+    /** 单个账号签到。流程对齐 Java 参考版 `MtSignApi.doSign`。 */
     suspend fun signOne(entity: AccountEntity): SignOutcome = withContext(Dispatchers.IO) {
         val account = entity.username
         var client = IsolatedClient(cookieRepo, account)
 
+        // ① 签到页：一次请求同时拿 formhash / 是否已签 / 排名，也顺带验会话
         var html = fetchPage(client)
         if (html == null) {
-            LogCenter.fail(LogTag.SIGN, "$account 签到失败", "签到页打不开")
+            LogCenter.fail(LogTag.SIGN, "$account 签到失败", "签到页打不开（网络或防护）")
             return@withContext SignOutcome(ok = false, message = "签到页打不开").also { auth.recordSign(account, it) }
         }
+        if (SignParser.isBlocked(html)) {
+            val outcome = SignOutcome(ok = false, message = "被站点防护拦截（请求太频繁），稍后再试")
+            auth.recordSign(account, outcome)
+            LogCenter.fail(LogTag.SIGN, "$account 签到失败", outcome.message)
+            return@withContext outcome
+        }
 
-        // 掉线 → 静默重登 → 重新取页
+        // ② 掉线 → 静默重登 → 重新取页
         if (SignParser.looksLoggedOut(html)) {
             LogCenter.skip("未登录", "$account 尝试用托管密码重登")
             val password = auth.passwordFor(account)
@@ -83,10 +90,11 @@ class SignInManager(
             html = fetchPage(client) ?: html
         }
 
+        // ③ 已经签过就别再提交：省一次请求，也避免被风控
         val pageState = SignParser.parsePage(html)
         if (pageState.alreadySigned) {
-            LogCenter.ok(LogTag.SIGN, "$account 今日已签到", pageState.reward)
-            return@withContext pageState.copy(ok = true).also { auth.recordSign(account, it) }
+            LogCenter.ok(LogTag.SIGN, "$account 今日已签到", pageState.reward.ifBlank { pageState.message })
+            return@withContext pageState.copy(ok = true, message = "今日已签到").also { auth.recordSign(account, it) }
         }
 
         val formhash = SignParser.formhashOf(html)
@@ -97,28 +105,39 @@ class SignInManager(
             return@withContext outcome
         }
 
-        val body = try {
+        // ④ 提交签到（format=text 返回最干净），失败再用伪静态按钮接口兜底
+        var raw = try {
             client.get(ApiUris.signAction(formhash), ajax = true, referer = ApiUris.signPage())
         } catch (t: Throwable) {
-            null
+            ""
         }
-        var outcome = body?.let { SignParser.parseAjaxResult(it) } ?: SignOutcome(ok = false, message = "签到请求失败")
-
-        // 第二判据：ajax 没认出来就回页面核对（Java 版「失败其实已成功」的坑）
-        if (!outcome.ok && !outcome.alreadySigned) {
-            val verifyHtml = fetchPage(client)
-            if (verifyHtml != null) {
-                val verify = SignParser.parsePage(verifyHtml)
-                if (verify.alreadySigned) {
-                    outcome = verify.copy(ok = true, message = "已签到（页面核对）")
-                }
+        var text = SignParser.parseSignResponse(raw)
+        if (text.isEmpty()) {
+            val raw2 = try {
+                client.get(ApiUris.signActionButton(formhash), referer = ApiUris.signPage())
+            } catch (t: Throwable) {
+                ""
             }
+            if (raw2.isNotBlank()) {
+                raw = raw2
+                text = SignParser.parseSignResponse(raw2)
+            }
+        }
+
+        // ⑤ 回读签到页：以页面真实状态为准（接口文案各版本差异太大）
+        val after = fetchPage(client) ?: html
+        var outcome = SignParser.combine(text, after, raw)
+
+        // 接口返回是整页 HTML（formhash 过期等）时，上面 combine 会用页面状态兜住；
+        // 这里再补一次：接口完全没信息、页面也没变 → 明确报失败而不是假成功
+        if (!outcome.ok && !outcome.alreadySigned && text.isEmpty() && !SignParser.isAlreadySigned(after)) {
+            outcome = outcome.copy(message = outcome.message.ifBlank { "签到请求没有返回结果，请稍后重试" })
         }
 
         if (outcome.ok || outcome.alreadySigned) {
             LogCenter.ok(
                 LogTag.SIGN,
-                "$account ${if (outcome.alreadySigned) "今日已签" else "签到成功"}",
+                "$account ${if (outcome.alreadySigned && !outcome.ok) "今日已签" else "签到成功"}",
                 buildString {
                     if (outcome.reward.isNotEmpty()) append("奖励 ${outcome.reward} ")
                     if (outcome.rank > 0) append("排名 ${outcome.rank} ")
@@ -132,14 +151,19 @@ class SignInManager(
         outcome
     }
 
-    private suspend fun fetchPage(client: IsolatedClient): String? = try {
-        client.get(ApiUris.signPage())
-    } catch (t: Throwable) {
-        // 论坛偶发 unexpected end of stream：退避后重试一次
-        delay(1200)
-        try {
-            client.get(ApiUris.signPage())
-        } catch (t2: Throwable) {
+    private suspend fun fetchPage(client: IsolatedClient): String? {
+        // 论坛偶发 unexpected end of stream：这些请求全是幂等的，直接退避重试
+        repeat(2) { attempt ->
+            try {
+                return client.get(ApiUris.signPage())
+            } catch (t: Throwable) {
+                if (attempt == 0) delay(1200)
+            }
+        }
+        // 伪静态页被拦 / 404 时回退插件入口
+        return try {
+            client.get(ApiUris.signPagePlugin())
+        } catch (t: Throwable) {
             null
         }
     }

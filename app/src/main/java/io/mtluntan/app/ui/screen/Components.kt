@@ -22,10 +22,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.AsyncImage
+import io.mtluntan.app.ui.components.MtCard
 import io.mtluntan.app.domain.model.ThreadItem
 
 @Composable
@@ -44,16 +48,21 @@ fun MessageBox(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun ThreadCard(item: ThreadItem, onClick: () -> Unit) {
-    Card(
+    MtCard(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Row(modifier = Modifier.padding(12.dp)) {
             if (item.images.isNotEmpty()) {
                 AsyncImage(
                     model = item.images.first(),
                     contentDescription = null,
-                    modifier = Modifier.width(72.dp).height(72.dp),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(72.dp)
+                        .height(72.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                 )
             }
             Column(

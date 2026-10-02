@@ -71,6 +71,8 @@ class MTLuntanApp : android.app.Application() {
 
     private fun setupWorkers() {
         appScope.launch {
+            // 老版本 0..5 的配色 → 新 12 色板（只生效一次）
+            runCatching { settings.migrateLegacyPalette() }
             val auto = settings.snapshotAutoSign()
             val (hour, minute) = settings.snapshotSignTime()
             if (auto) SignScheduler.schedule(this@MTLuntanApp, hour, minute) else SignScheduler.cancel(this@MTLuntanApp)

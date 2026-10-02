@@ -54,6 +54,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
 import io.mtluntan.app.domain.model.Account
+import io.mtluntan.app.domain.model.displayName
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.util.CopyUtil
 import io.mtluntan.app.util.Refresh
@@ -79,6 +80,10 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
     var passwordInput by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<Account?>(null) }
     var hasPassword by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var cookieDialog by remember { mutableStateOf(false) }
+    var cookieInput by remember { mutableStateOf("") }
+    var cookieBusy by remember { mutableStateOf(false) }
+    var nameFallback by remember { mutableStateOf("") }
 
     LaunchedEffect(accounts) {
         hasPassword = accounts.filter { app.auth.hasPassword(it.username) }.map { it.username }.toSet()
@@ -92,7 +97,8 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                     IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
-                    IconButton(onClick = { nav.navigate(Routes.LOGIN) }) { Icon(Icons.Filled.Add, "添加账号") }
+                    IconButton(onClick = { nav.navigate(Routes.LOGIN) }) { Icon(Icons.Filled.Add, "用 WebView 登录") }
+                    IconButton(onClick = { cookieDialog = true }) { Icon(Icons.Filled.Key, "用 Cookie 添加") }
                 },
             )
         },
@@ -129,6 +135,12 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                         Spacer(Modifier.height(6.dp))
                         Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "添加账号两种方式：① 网页登录（自动识别身份）② 直接粘浏览器里的 Cookie",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             if (accounts.isEmpty()) {
@@ -143,7 +155,7 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                         scope.launch {
                             app.auth.activate(account.username)
                             Refresh.bumpGeneration()
-                            CopyUtil.toast(context, "已切换到 ${account.nickname.ifBlank { account.username }}")
+                            CopyUtil.toast(context, "已切换到 ${account.displayName}")
                         }
                     },
                     onToggleEnabled = { enabled ->
@@ -168,9 +180,27 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
                             val password = app.auth.passwordFor(account.username)
                             val status = app.guard.verify(account.username, password, repair = password.isNotEmpty())
                             message = buildString {
-                                append(account.username)
+                                append(account.displayName)
                                 append(if (status.loggedIn) "：会话正常" else "：${status.message}")
                                 if (status.repaired) append("（已自动重登）")
+                            }
+                            // 顺便把身份信息补全（旧版本存下来的账号 uid / 昵称可能是空的）
+                            if (status.loggedIn) {
+                                runCatching {
+                                    val profile = app.forum.identityOf(
+                                        io.mtluntan.app.data.network.IsolatedClient(app.net.cookieRepo, account.username)
+                                    )
+                                    if (profile.uid > 0 || profile.username.isNotBlank()) {
+                                        app.auth.updateInfo(
+                                            username = account.username,
+                                            uid = profile.uid,
+                                            nickname = profile.username,
+                                            avatar = profile.avatarUrl,
+                                        )
+                                        app.auth.refreshCookieSnapshot(account.username)
+                                        message += " · 已补全为 ${profile.username.ifBlank { "uid_" + profile.uid }}"
+                                    }
+                                }
                             }
                             if (status.loggedIn) app.auth.markExpired(account.username, false)
                         }
@@ -179,6 +209,89 @@ fun AccountManagerScreen(app: MTLuntanApp, nav: NavHostController) {
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+
+    if (cookieDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!cookieBusy) cookieDialog = false },
+            title = { Text("用 Cookie 添加账号") },
+            text = {
+                Column {
+                    Text(
+                        "浏览器 F12 → Network → 复制 Cookie 整串（要包含 xxx_auth 与 xxx_saltkey），粘到下面即可。\n" +
+                            "客户端会请求个人页确认真实身份，不会用 Cookie 名猜账号。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = cookieInput,
+                        onValueChange = { cookieInput = it },
+                        label = { Text("Cookie 字符串") },
+                        minLines = 3,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (nameFallback.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "身份识别失败，请手填一个名字（仅本地标识用）：",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        OutlinedTextField(
+                            value = nameFallback,
+                            onValueChange = { nameFallback = it },
+                            label = { Text("备注名") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !cookieBusy,
+                    onClick = {
+                        val raw = cookieInput.trim()
+                        if (raw.isBlank()) { CopyUtil.toast(context, "先粘贴 Cookie"); return@TextButton }
+                        cookieBusy = true
+                        scope.launch {
+                            try {
+                                app.auth.stagePendingCookies(raw)
+                                val profile = app.forum.identityOf(app.auth.pendingClient())
+                                val username = profile.username.ifBlank { "uid_${profile.uid}" }
+                                if (profile.uid <= 0 && profile.username.isBlank()) {
+                                    if (nameFallback.isBlank()) {
+                                        nameFallback = "account_${System.currentTimeMillis() % 100000}"
+                                        CopyUtil.toast(context, "Cookie 没换到身份信息，确认名字后再点一次")
+                                        return@launch
+                                    }
+                                    app.auth.importStaged(raw, nameFallback, 0, nameFallback)
+                                } else {
+                                    app.auth.importStaged(
+                                        cookieString = raw,
+                                        username = username,
+                                        uid = profile.uid,
+                                        nickname = profile.username,
+                                        avatar = profile.avatarUrl,
+                                    )
+                                }
+                                CopyUtil.toast(context, "已添加：$username")
+                                cookieDialog = false
+                                cookieInput = ""
+                                nameFallback = ""
+                            } catch (t: Throwable) {
+                                CopyUtil.toast(context, "导入失败：${t.message}")
+                            } finally {
+                                cookieBusy = false
+                            }
+                        }
+                    },
+                ) { Text(if (cookieBusy) "识别中…" else "导入") }
+            },
+            dismissButton = { TextButton(onClick = { cookieDialog = false }) { Text("取消") } },
+        )
     }
 
     passwordFor?.let { account ->
@@ -268,7 +381,7 @@ private fun AccountCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            account.nickname.ifBlank { account.username },
+                            account.displayName,
                             style = MaterialTheme.typography.titleSmall,
                         )
                         if (isActive) {

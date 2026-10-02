@@ -24,13 +24,23 @@ class AppSettings(private val context: Context) {
     companion object {
         // ---- 外观 ----
         val KEY_DARK_MODE = booleanPreferencesKey("dark_mode")          // null = 跟随系统
-        val KEY_THEME_COLOR = intPreferencesKey("theme_color")          // 0..5
+        val KEY_THEME_COLOR = intPreferencesKey("theme_color")          // 0..11 + 12=自定义
+        /** 1.0 的 6 套配色 → 12 色板的就近映射（0 MT蓝 1 森野绿 2 暖阳橙 3 葡萄紫 4 樱花粉 5 青碧）。 */
+        val LEGACY_PALETTE_MAP = intArrayOf(0, 6, 2, 5, 4, 10)
+        /** 1.0 的 6 套配色是否已经映射到新的 12 色调色板。 */
+        val KEY_PALETTE_MIGRATED = booleanPreferencesKey("theme_palette_migrated")
         val KEY_OPACITY = intPreferencesKey("ui_opacity")               // 0 半透明 / 1 标准 / 2 不透明
         val KEY_DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val KEY_FONT_SCALE = intPreferencesKey("font_scale")            // 0..4 档
         val KEY_BOTTOM_AUTO_HIDE = booleanPreferencesKey("bottom_auto_hide")
         val KEY_IMAGE_MODE = stringPreferencesKey("image_mode")         // inline | gallery
         val KEY_HIDE_BLACKLIST = booleanPreferencesKey("hide_blacklist") // 隐藏黑名单用户的发言
+        val KEY_THEME_SHADE = intPreferencesKey("theme_shade")          // 0..100 背景着色浓度
+        val KEY_GLASS_LEVEL = intPreferencesKey("glass_level")          // 0 关 / 1 轻 / 2 强
+        val KEY_MOTION_ENABLED = booleanPreferencesKey("motion_enabled")
+        val KEY_MOTION_DAMPING = intPreferencesKey("motion_damping")    // 0..100
+        val KEY_CUSTOM_SEED = longPreferencesKey("custom_seed")         // 自定义种子色 ARGB
+        val KEY_AUTO_PAGINATION = booleanPreferencesKey("auto_pagination") // 评论自动下一页
 
         // ---- 网络与阅读 ----
         val KEY_DESKTOP_MODE = booleanPreferencesKey("desktop_mode")
@@ -89,6 +99,12 @@ class AppSettings(private val context: Context) {
     val bottomAutoHide: Flow<Boolean> = context.dataStore.data.map { it[KEY_BOTTOM_AUTO_HIDE] ?: true }
     val imageMode: Flow<String> = context.dataStore.data.map { it[KEY_IMAGE_MODE] ?: "inline" }
     val hideBlacklist: Flow<Boolean> = context.dataStore.data.map { it[KEY_HIDE_BLACKLIST] ?: false }
+    val themeShade: Flow<Int> = context.dataStore.data.map { it[KEY_THEME_SHADE] ?: 45 }
+    val glassLevel: Flow<Int> = context.dataStore.data.map { it[KEY_GLASS_LEVEL] ?: 1 }
+    val motionEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_MOTION_ENABLED] ?: true }
+    val motionDamping: Flow<Int> = context.dataStore.data.map { it[KEY_MOTION_DAMPING] ?: 50 }
+    val customSeed: Flow<Long> = context.dataStore.data.map { it[KEY_CUSTOM_SEED] ?: 0L }
+    val autoPagination: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_PAGINATION] ?: true }
 
     val desktopMode: Flow<Boolean> = context.dataStore.data.map { it[KEY_DESKTOP_MODE] ?: false }
     val downloadMode: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_MODE] ?: "inapp" }
@@ -129,12 +145,34 @@ class AppSettings(private val context: Context) {
     }
 
     suspend fun setThemeColor(v: Int) = context.dataStore.edit { it[KEY_THEME_COLOR] = v }
+
+    /**
+     * 旧版只有 6 套配色（0..5），新调色板有 12 套 + 自定义。
+     * 直接沿用旧下标会「换主题变了个色」，所以启动时按色相就近映射一次，只做一次。
+     *
+     * 0 MT 蓝 → 冰蓝(Aurora)  1 森野绿 → 竹青(Forest)  2 暖阳橙 → 落日(Sunset)
+     * 3 葡萄紫 → 星夜(Galaxy)  4 樱花粉 → 樱花(Sakura)  5 青碧 → 深海(Ocean)
+     */
+    suspend fun migrateLegacyPalette() = context.dataStore.edit { prefs ->
+        if (prefs[KEY_PALETTE_MIGRATED] == true) return@edit
+        val legacy = prefs[KEY_THEME_COLOR]
+        if (legacy != null) {
+            prefs[KEY_THEME_COLOR] = LEGACY_PALETTE_MAP.getOrElse(legacy) { 0 }
+        }
+        prefs[KEY_PALETTE_MIGRATED] = true
+    }
     suspend fun setOpacity(v: Int) = context.dataStore.edit { it[KEY_OPACITY] = v }
     suspend fun setDynamicColor(v: Boolean) = context.dataStore.edit { it[KEY_DYNAMIC_COLOR] = v }
     suspend fun setFontScale(v: Int) = context.dataStore.edit { it[KEY_FONT_SCALE] = v }
     suspend fun setBottomAutoHide(v: Boolean) = context.dataStore.edit { it[KEY_BOTTOM_AUTO_HIDE] = v }
     suspend fun setImageMode(v: String) = context.dataStore.edit { it[KEY_IMAGE_MODE] = v }
     suspend fun setHideBlacklist(v: Boolean) = context.dataStore.edit { it[KEY_HIDE_BLACKLIST] = v }
+    suspend fun setThemeShade(v: Int) = context.dataStore.edit { it[KEY_THEME_SHADE] = v.coerceIn(0, 100) }
+    suspend fun setGlassLevel(v: Int) = context.dataStore.edit { it[KEY_GLASS_LEVEL] = v.coerceIn(0, 2) }
+    suspend fun setMotionEnabled(v: Boolean) = context.dataStore.edit { it[KEY_MOTION_ENABLED] = v }
+    suspend fun setMotionDamping(v: Int) = context.dataStore.edit { it[KEY_MOTION_DAMPING] = v.coerceIn(0, 100) }
+    suspend fun setCustomSeed(v: Long) = context.dataStore.edit { it[KEY_CUSTOM_SEED] = v }
+    suspend fun setAutoPagination(v: Boolean) = context.dataStore.edit { it[KEY_AUTO_PAGINATION] = v }
 
     suspend fun setDesktopMode(v: Boolean) = context.dataStore.edit { it[KEY_DESKTOP_MODE] = v }
     suspend fun setDownloadMode(v: String) = context.dataStore.edit { it[KEY_DOWNLOAD_MODE] = v }

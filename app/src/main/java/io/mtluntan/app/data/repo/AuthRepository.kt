@@ -5,6 +5,7 @@ import io.mtluntan.app.data.db.entity.AccountEntity
 import io.mtluntan.app.data.db.entity.SignRecordEntity
 import io.mtluntan.app.data.local.AppSettings
 import io.mtluntan.app.data.network.CookieRepository
+import io.mtluntan.app.data.network.IsolatedClient
 import io.mtluntan.app.data.network.SessionHolder
 import io.mtluntan.app.data.network.Site
 import io.mtluntan.app.domain.model.Account
@@ -56,6 +57,9 @@ class AuthRepository(
         SessionHolder.setAccount(name)
         settings.setActiveAccount(name)
         LogCenter.log(LogTag.RUN, if (name == null) "切换到游客" else "切换到账号 $name")
+        // 切号必须让所有页面重新拉取：消息 / 私信 / 导读 / 我的 都跟着账号走，
+        // 否则会看到上一个账号的数据（用户反馈「消息部分与账号不同步」）
+        io.mtluntan.app.util.Refresh.bumpGeneration()
     }
 
     // ---------------- 登录 / 导入 ----------------
@@ -101,6 +105,50 @@ class AuthRepository(
         LogCenter.ok(LogTag.RUN, "登录成功：$username")
     }
 
+    /**
+     * 登录身份识别（修「账号管理处读取异常 / 加第二个账号把第一个读取了」）。
+     *
+     * 旧实现从 Cookie **名字**里猜用户名：Discuz 的 `xxx_auth` 前缀是随机盐
+     * （形如 `a1b2_2132_auth`），猜出来的「用户名」两个账号很容易撞在一起，
+     * 于是第二个账号直接覆盖了第一个 —— 表现就是「添加第二个时读到了第一个」。
+     *
+     * 正确做法（Java 参考版 LoginBottomSheet.doCookieLogin）：
+     * 把 Cookie 先挂到一个**临时会话**上，请求个人页，由服务端告诉我们是谁。
+     */
+    companion object {
+        /** 临时会话的账号 key：登录时先挂 Cookie，再问服务端「我是谁」。 */
+        const val PENDING_HANDLE = "__pending_login__"
+    }
+
+    /** 把登录产生的整串 Cookie 挂到临时会话，供身份识别使用。 */
+    suspend fun stagePendingCookies(cookieString: String) = withContext(Dispatchers.IO) {
+        cookieRepo.clearForAccount(PENDING_HANDLE)
+        cookieRepo.importCookieString(cookieString, PENDING_HANDLE)
+    }
+
+    fun pendingClient(): IsolatedClient = IsolatedClient(cookieRepo, PENDING_HANDLE)
+
+    /** 身份识别失败时用户手填的名字 → 保证也能入库（名字只用于本地标识）。 */
+    suspend fun importStaged(
+        cookieString: String,
+        username: String,
+        uid: Long = 0,
+        nickname: String = "",
+        avatar: String = "",
+        password: String? = null,
+    ) {
+        val real = resolveUsername(username, uid)
+        importSession(real, uid, cookieString, avatar, nickname, password)
+        cookieRepo.clearForAccount(PENDING_HANDLE)
+    }
+
+    /** 用 uid / 昵称拼一个不会和别人撞车的本地用户名。 */
+    private fun resolveUsername(username: String, uid: Long): String {
+        val trimmed = username.trim()
+        if (trimmed.isNotEmpty() && !trimmed.startsWith("__")) return trimmed
+        return if (uid > 0) "uid_$uid" else "account_${System.currentTimeMillis()}"
+    }
+
     /** 账号密码直接登录（隔离会话，不污染前台），成功后入库。 */
     suspend fun loginWithPassword(username: String, password: String, keepPassword: Boolean): Pair<Boolean, String> =
         withContext(Dispatchers.IO) {
@@ -112,6 +160,19 @@ class AuthRepository(
             )
             true to "已保存账号"
         }
+
+    // ---------------- 导入去重 ----------------
+
+    private val importing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** WebView 每次 onPageFinished 都会触发导入，用一个闸门避免重复入库。 */
+    fun isImporting(): Boolean = importing.get()
+
+    fun beginImport(): Boolean = importing.compareAndSet(false, true)
+
+    fun endImport() {
+        importing.set(false)
+    }
 
     // ---------------- 密码托管 ----------------
 

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
@@ -79,6 +80,7 @@ import coil.compose.AsyncImage
 import io.mtluntan.app.MTLuntanApp
 import io.mtluntan.app.data.parser.BbcBlocks
 import io.mtluntan.app.data.parser.ThreadExtrasParser
+import io.mtluntan.app.ui.components.RevealItem
 import io.mtluntan.app.domain.model.LikeUser
 import io.mtluntan.app.domain.model.Post
 import io.mtluntan.app.domain.model.ThreadDetail
@@ -128,6 +130,13 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     var pendingAttachment by remember { mutableStateOf<io.mtluntan.app.domain.model.Attachment?>(null) }
     var downloading by remember { mutableStateOf("") }
     var offlineMode by remember { mutableStateOf(false) }
+    // 自动翻页累积的后续页楼层（detail 只保留「当前这一页」的解析结果）
+    val extraPosts = remember { mutableStateListOf<Post>() }
+    var autoFetching by remember { mutableStateOf(0) }
+    val autoPagination by app.settings.autoPagination.collectAsStateWithLifecycle(initialValue = true)
+    val hideBlacklist by app.settings.hideBlacklist.collectAsStateWithLifecycle(initialValue = false)
+    val blacklist by app.local.blacklist.collectAsStateWithLifecycle(initialValue = emptyList())
+    val blacklistUids = remember(blacklist) { blacklist.map { it.uid }.toSet() }
 
     suspend fun load(targetPage: Int, keepScroll: Boolean = false) {
         loading = true
@@ -137,6 +146,7 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
             pageHtml = html
             val parsed = io.mtluntan.app.data.parser.ThreadDetailParser.parse(html, targetPage)
             detail = parsed
+            if (targetPage <= 1) extraPosts.clear()
             if (parsed.loginRequired) {
                 error = "需要先登录才能查看这个帖子"
             } else if (parsed.errorMessage.isNotEmpty()) {
@@ -145,6 +155,16 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 error = ""
                 app.local.recordVisit(tid, parsed.title, parsed.forumName, parsed.mainPost?.authorName ?: "", targetPage, parsed.totalPages)
                 app.local.markRead(tid)
+                // 本页一条回复都没解析到、但后面还有页 → 自动把评论接上（用户反馈：评论区要自动下一页）
+                if (autoPagination && parsed.posts.isEmpty() &&
+                    parsed.currentPage < parsed.totalPages && autoFetching < 6
+                ) {
+                    autoFetching++
+                    load(targetPage + 1, keepScroll = true)
+                    autoFetching--
+                } else if (targetPage > 1) {
+                    extraPosts.addAll(parsed.posts.filter { p -> extraPosts.none { it.pid == p.pid } })
+                }
                 favorited = app.local.isFavorite(tid)
                 likedPids.clear(); likedPids.addAll(if (parsed.likedByCurrent) listOf(parsed.mainPost?.pid ?: 0L) else emptyList())
                 editablePids.clear(); editablePids.addAll(ThreadExtrasParser.editablePids(html))
@@ -184,10 +204,29 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
     // 阅读进度：进来先查上次读到第几页/第几楼，给一个「继续阅读」入口
     var resumePage by remember { mutableIntStateOf(0) }
     var lastFloorSeen by remember { mutableIntStateOf(0) }
+    var maxPageSeen by remember { mutableIntStateOf(1) }
     LaunchedEffect(tid) {
         val (floor, savedPage) = app.local.progressFor(tid)
         lastFloorSeen = floor
+        maxPageSeen = savedPage.coerceAtLeast(1)
         if (savedPage > 1) resumePage = savedPage
+    }
+
+    // 记录「最远读到第几页」：回头翻旧页不能把进度改小
+    LaunchedEffect(page, detail) {
+        // detail 是 remember 委托属性，Kotlin 不能对它做智能转换 → 取局部变量
+        val d = detail
+        if (d != null && page > maxPageSeen) {
+            maxPageSeen = page
+            app.local.recordVisit(
+                tid,
+                d.title,
+                d.forumName,
+                d.mainPost?.authorName.orEmpty(),
+                lastFloorSeen.coerceAtLeast(1),
+                d.totalPages,
+            )
+        }
     }
 
     // 停在某一楼 0.8 秒就记进度（不新建协程、离开页面也不会丢）
@@ -399,7 +438,9 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                 }
                 current == null -> MessageBox("加载失败")
                 else -> {
-                    val posts = listOfNotNull(current.mainPost) + current.posts
+                    val posts = (listOfNotNull(current.mainPost) + current.posts + extraPosts)
+                        .distinctBy { it.pid }
+                        .let { list -> if (hideBlacklist) list else list }
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         if (offlineMode) {
                             item {
@@ -481,7 +522,17 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 }
                             }
                         }
-                        items(posts, key = { it.pid }) { post ->
+                        itemsIndexed(posts, key = { _, post -> post.pid }) { index, post ->
+                            if (hideBlacklist && post.uid > 0 && blacklistUids.contains(post.uid)) {
+                                RevealItem(index) {
+                                    CollapsedFloor(
+                                        author = post.authorName,
+                                        floor = post.floor,
+                                        onShow = { scope.launch { app.local.removeBlacklist(post.uid) } },
+                                    )
+                                }
+                            } else {
+                            RevealItem(index) {
                             PostCard(
                                 post = post,
                                 editable = editablePids.contains(post.pid),
@@ -515,6 +566,22 @@ fun ThreadScreen(app: MTLuntanApp, nav: NavHostController, tid: Long) {
                                 },
                                 onMore = { menuPost = post },
                             )
+                            }
+                            }
+                        }
+                        if (posts.size > 1 && !offlineMode) {
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    Text(
+                                        "已显示 ${posts.size} 楼 · 第 ${current.currentPage}/${current.totalPages} 页",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            }
                         }
                         item { Spacer(Modifier.height(12.dp)) }
                     }
@@ -871,5 +938,33 @@ fun OfflineSaveRow(tid: Long, title: String, app: MTLuntanApp, onDone: (String) 
         Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
         Text("保存到离线列表")
+    }
+}
+
+
+/** 黑名单用户的楼层占位（点一下就能恢复显示，避免「看不了」变成「看不到」）。 */
+@Composable
+private fun CollapsedFloor(author: String, floor: Int, onShow: () -> Unit) {
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Block, null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                (if (floor > 0) "$floor 楼 · " else "") + "$author 已被你拉黑，内容已折叠",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onShow) { Text("不再拉黑", style = MaterialTheme.typography.labelSmall) }
+        }
     }
 }

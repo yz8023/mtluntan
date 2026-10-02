@@ -82,24 +82,45 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
 
     suspend fun load() {
         loading = true
+        // 委托属性不能智能转换；顺便保证「这一轮加载」用的是同一个账号
+        val account = activeAccount
+        // 先清空：切号后如果这一秒还在等网络，界面不能继续显示上一个账号的消息
+        notices = emptyList()
+        pms = emptyList()
+        io.mtluntan.app.util.UnreadState.clear(account)
         try {
+            if (account == null) {
+                error = "登录后可以查看通知和私信"
+                loading = false
+                return
+            }
             notices = app.forum.notices()
             pms = app.forum.pms()
             error = ""
-            // 记录基线（按账号）
-            activeAccount?.let { account ->
-                app.settings.setBadgeBaseline(account, "${notices.count { it.isNew }}:${pms.sumOf { it.unread }}")
-            }
+            // 记录基线（按账号）—— 切号不会把历史消息全标成新消息
+            app.settings.setBadgeBaseline(
+                account,
+                "${notices.count { it.isNew }}:${pms.sumOf { it.unread }}",
+            )
+            io.mtluntan.app.util.UnreadState.update(
+                account = account,
+                notices = notices.count { it.isNew },
+                pms = pms.sumOf { it.unread },
+            )
         } catch (t: Throwable) {
             error = t.message ?: "加载失败"
         }
         loading = false
     }
 
-    LaunchedEffect(generation) { load() }
+    // 账号变了要重载；点当前 Tab 刷新也要重载
+    LaunchedEffect(generation, activeAccount) { load() }
 
     val tabTick by Refresh.tabTick.collectAsStateWithLifecycle(initialValue = 0)
     LaunchedEffect(tabTick) { if (tabTick > 0) load() }
+
+    // 切号时立刻把角标归零，避免「A 账号的红点留在 B 账号上」
+    LaunchedEffect(activeAccount) { io.mtluntan.app.util.UnreadState.clear(activeAccount) }
 
     Scaffold(
         topBar = {
@@ -111,6 +132,7 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
                     IconButton(onClick = {
                         scope.launch {
                             app.forum.markNoticesRead()
+                            io.mtluntan.app.util.UnreadState.markAllRead()
                             CopyUtil.toast(context, "已请求服务端标记已读")
                             load()
                         }
@@ -125,6 +147,7 @@ fun NoticeScreen(app: MTLuntanApp, nav: NavHostController? = null, onOpenDrawer:
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("私信 ${if (pms.sumOf { it.unread } > 0) "·${pms.sumOf { it.unread }}" else ""}") })
             }
             when {
+                activeAccount == null -> MessageBox("当前是游客模式\n登录后这里会显示通知与私信")
                 loading && notices.isEmpty() && pms.isEmpty() -> LoadingBox()
                 error.isNotEmpty() && notices.isEmpty() && pms.isEmpty() -> MessageBox(error)
                 tab == 0 -> {

@@ -1,6 +1,7 @@
 package io.mtluntan.app.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,10 +45,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import io.mtluntan.app.MTLuntanApp
+import io.mtluntan.app.ui.components.MtSegmented
 import io.mtluntan.app.ui.navigation.Routes
 import io.mtluntan.app.ui.theme.OpacityLabels
 import io.mtluntan.app.ui.theme.ThemePresets
@@ -62,7 +67,6 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
     val scope = rememberCoroutineScope()
 
     val darkMode by app.settings.darkMode.collectAsStateWithLifecycle(initialValue = null)
-    val themeColor by app.settings.themeColor.collectAsStateWithLifecycle(initialValue = 0)
     val opacity by app.settings.opacity.collectAsStateWithLifecycle(initialValue = 1)
     val dynamicColor by app.settings.dynamicColor.collectAsStateWithLifecycle(initialValue = false)
     val fontScale by app.settings.fontScale.collectAsStateWithLifecycle(initialValue = 0)
@@ -79,6 +83,12 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
     val notify by app.settings.notifyEnabled.collectAsStateWithLifecycle(initialValue = true)
     val autoReply by app.settings.autoReply.collectAsStateWithLifecycle(initialValue = false)
     val recordDetail by app.settings.recordDetailMode.collectAsStateWithLifecycle(initialValue = false)
+    val paletteIndex by app.settings.themeColor.collectAsStateWithLifecycle(initialValue = 0)
+    val shade by app.settings.themeShade.collectAsStateWithLifecycle(initialValue = 45)
+    val glassIndex by app.settings.glassLevel.collectAsStateWithLifecycle(initialValue = 1)
+    val motionEnabled by app.settings.motionEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val motionDamping by app.settings.motionDamping.collectAsStateWithLifecycle(initialValue = 50)
+    val autoPagination by app.settings.autoPagination.collectAsStateWithLifecycle(initialValue = true)
 
     Scaffold(
         topBar = {
@@ -165,7 +175,134 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
             }
             item { EntryLine("黑名单", "被拉黑的人不再显示发言") { nav.navigate(Routes.BLACKLIST) } }
 
-            item { GroupTitle("外观与阅读") }
+            item { GroupTitle("主题与外观") }
+
+            // ---- 调色板（12 套种子色，整套配色由引擎生成） ----
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text("调色板", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "整套配色（卡片 / 底栏 / 按钮）都由这一颗种子色生成",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    // 两行六列，换行布局不用 LazyVerticalGrid，避免嵌套滚动
+                    io.mtluntan.app.ui.theme.MtPalette.entries.chunked(6).forEach { rowItems ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 10.dp)) {
+                            rowItems.forEach { palette ->
+                                val index = io.mtluntan.app.ui.theme.MtPalette.entries.indexOf(palette)
+                                val selected = index == paletteIndex
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.clickable {
+                                        scope.launch {
+                                            app.settings.setThemeColor(index)
+                                            if (palette == io.mtluntan.app.ui.theme.MtPalette.Custom) {
+                                                // 自定义：先用当前主题色做种子，可再去「自定义种子色」里换
+                                                app.settings.setCustomSeed(
+                                                    io.mtluntan.app.ui.theme.swatchColor(palette).toArgb().toLong()
+                                                )
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .background(io.mtluntan.app.ui.theme.swatchColor(palette), CircleShape)
+                                            .then(
+                                                if (selected) Modifier.border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                                else Modifier
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (selected) Text("✓", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        palette.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- 自定义种子色 ----
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text("自定义种子色", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "拖动色相条，主题色实时跟着变",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            0xFF2F6BFF, 0xFF00A3A3, 0xFF16A06A, 0xFF7CB342, 0xFFC29A16,
+                            0xFFE2703A, 0xFFE05B72, 0xFFD46AA5, 0xFF6C5CE7, 0xFF3E4C59,
+                        ).forEach { argb ->
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(Color(argb.toInt()), CircleShape)
+                                    .clickable {
+                                        scope.launch {
+                                            app.settings.setCustomSeed(argb.toLong())
+                                            app.settings.setThemeColor(
+                                                io.mtluntan.app.ui.theme.MtPalette.entries.indexOf(io.mtluntan.app.ui.theme.MtPalette.Custom)
+                                            )
+                                        }
+                                    }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ---- 浓度 ----
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text("背景着色浓度", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "0 = 接近纯白/纯黑，100 = 背景也明显带主题色",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Slider(
+                        value = shade.toFloat(),
+                        onValueChange = { value -> scope.launch { app.settings.setThemeShade(value.toInt()) } },
+                        valueRange = 0f..100f,
+                    )
+                }
+            }
+
+            // ---- 玻璃档位 ----
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text("玻璃质感", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "面板半透明 + 描边高光，内容仍在实色卡片上，不影响阅读",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    MtSegmented(
+                        options = io.mtluntan.app.ui.theme.GlassLevel.entries.map { it.label },
+                        selected = io.mtluntan.app.ui.theme.GlassLevel.entries[glassIndex.coerceIn(0, 2)].label,
+                        onSelect = { label ->
+                            val level = io.mtluntan.app.ui.theme.GlassLevel.entries.first { it.label == label }
+                            scope.launch { app.settings.setGlassLevel(level.ordinal) }
+                        },
+                    )
+                }
+            }
+
             item {
                 SettingChoice(
                     title = "深色模式",
@@ -173,49 +310,26 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                     selected = when (darkMode) { null -> "跟随系统"; true -> "深色"; else -> "浅色" },
                     onSelect = { value ->
                         scope.launch {
-                            app.settings.setDarkMode(
-                                when (value) { "深色" -> true; "浅色" -> false; else -> null }
-                            )
+                            app.settings.setDarkMode(when (value) { "深色" -> true; "浅色" -> false; else -> null })
                         }
                     },
                 )
             }
             item {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-                    Text("主题色", style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ThemePresets.forEachIndexed { index, preset ->
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(androidx.compose.ui.graphics.Color(preset.light), CircleShape)
-                                    .clickable { scope.launch { app.settings.setThemeColor(index) } },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (index == themeColor) {
-                                    Text("✓", color = androidx.compose.ui.graphics.Color.White)
-                                }
-                            }
-                        }
-                    }
-                }
+                SettingSwitch(
+                    title = "动态取色",
+                    subtitle = "安卓 12+ 跟随壁纸取色（会覆盖上面的调色板）",
+                    checked = dynamicColor,
+                    onChange = { scope.launch { app.settings.setDynamicColor(it) } },
+                )
             }
             item {
                 SettingChoice(
-                    title = "悬浮面板不透明度",
+                    title = "面板不透明度",
                     subtitle = "底栏与侧边栏共用这一档",
                     options = OpacityLabels,
                     selected = OpacityLabels.getOrElse(opacity) { "标准" },
                     onSelect = { value -> scope.launch { app.settings.setOpacity(OpacityLabels.indexOf(value)) } },
-                )
-            }
-            item {
-                SettingSwitch(
-                    title = "动态取色",
-                    subtitle = "安卓 12+ 跟随壁纸取色（会覆盖上面的主题色）",
-                    checked = dynamicColor,
-                    onChange = { scope.launch { app.settings.setDynamicColor(it) } },
                 )
             }
             item {
@@ -224,11 +338,35 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                     options = listOf("小", "标准", "大", "特大", "超大"),
                     selected = listOf("小", "标准", "大", "特大", "超大").getOrElse(fontScale) { "标准" },
                     onSelect = { value ->
-                        scope.launch {
-                            app.settings.setFontScale(listOf("小", "标准", "大", "特大", "超大").indexOf(value))
-                        }
+                        scope.launch { app.settings.setFontScale(listOf("小", "标准", "大", "特大", "超大").indexOf(value)) }
                     },
                 )
+            }
+
+            item { GroupTitle("动效") }
+
+            item {
+                SettingSwitch(
+                    title = "交互动效",
+                    subtitle = "按压缩放、列表交错入场、指示器滑动；关闭后瞬时切换",
+                    checked = motionEnabled,
+                    onChange = { scope.launch { app.settings.setMotionEnabled(it) } },
+                )
+            }
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text("动效阻尼", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "左 = 更弹、更活泼；右 = 更顺、更克制（一个滑杆统一全 App 手感）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Slider(
+                        value = motionDamping.toFloat(),
+                        onValueChange = { value -> scope.launch { app.settings.setMotionDamping(value.toInt()) } },
+                        valueRange = 0f..100f,
+                    )
+                }
             }
             item {
                 SettingSwitch(
@@ -236,6 +374,14 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
                     subtitle = "向下滚动收起，向上滚动或停下再出现",
                     checked = bottomAutoHide,
                     onChange = { scope.launch { app.settings.setBottomAutoHide(it) } },
+                )
+            }
+            item {
+                SettingSwitch(
+                    title = "评论自动下一页",
+                    subtitle = "一页没解析到回复时，自动把后面的页接上",
+                    checked = autoPagination,
+                    onChange = { scope.launch { app.settings.setAutoPagination(it) } },
                 )
             }
             item {
@@ -249,7 +395,7 @@ fun SettingsScreen(app: MTLuntanApp, nav: NavHostController) {
             item {
                 SettingSwitch(
                     title = "隐藏黑名单用户发言",
-                    subtitle = "开启后楼层里直接折叠掉这些人的内容",
+                    subtitle = "楼层折叠成一行，点一下可恢复",
                     checked = hideBlacklist,
                     onChange = { scope.launch { app.settings.setHideBlacklist(it) } },
                 )

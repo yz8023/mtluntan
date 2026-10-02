@@ -75,8 +75,21 @@ object ApiUris {
         "$SITE/search.php?mod=forum&srchtxt=${java.net.URLEncoder.encode(q, "UTF-8")}" +
             "&searchsubmit=yes&page=$page&mobile=2"
 
-    /** Check-in plugin endpoint (k_misign). */
-    fun signPage(): String = "$SITE/plugin.php?id=k_misign:sign&mobile=2"
+    /**
+     * 签到页。
+     *
+     * 用**伪静态** `k_misign-sign.html`（与 Java 参考版一致）：
+     * `plugin.php?id=k_misign:sign` 在部分账号/网络下会被重写规则或防护拦掉，
+     * 而伪静态页永远能出 formhash 与「今日已签」状态。
+     */
+    fun signPage(): String = "$SITE/k_misign-sign.html"
+
+    /** 备用签到页（伪静态被拦时回退）。 */
+    fun signPagePlugin(): String = "$SITE/plugin.php?id=k_misign:sign&mobile=2"
+
+    /** 伪静态按钮接口：部分账号 plugin.php 会被重写规则拦掉。 */
+    fun signActionButton(formhash: String): String =
+        "$SITE/k_misign-sign.html?operation=qiandao&format=button&formhash=$formhash&inajax=1&ajaxtarget=midaben_sign"
 
     fun signAction(formhash: String): String =
         "$SITE/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash=$formhash"

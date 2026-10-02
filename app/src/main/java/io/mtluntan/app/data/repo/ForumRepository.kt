@@ -1,6 +1,7 @@
 package io.mtluntan.app.data.repo
 
 import io.mtluntan.app.data.network.ApiUris
+import io.mtluntan.app.data.network.IsolatedClient
 import io.mtluntan.app.data.network.Net
 import io.mtluntan.app.data.network.Site
 import io.mtluntan.app.data.parser.EditorParser
@@ -29,6 +30,7 @@ import io.mtluntan.app.util.LogCenter
 import io.mtluntan.app.util.LogCenter.LogTag
 import io.mtluntan.app.util.PerfLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -268,6 +270,24 @@ class ForumRepository(private val net: Net) {
     suspend fun profile(uid: Long): UserProfile = timed("用户页") {
         val html = net.get(ApiUris.space(uid), foreground = true)
         SocialParser.enrichProfile(UserPagesParser.parseProfile(html), html)
+    }
+
+    /**
+     * 用**指定会话**识别「我」是谁：请求个人页，由服务端返回真实 uid / 用户名。
+     * 登录导入、检测会话都走这里，绝不从 Cookie 名字猜身份。
+     */
+    suspend fun identityOf(client: IsolatedClient): UserProfile = withContext(Dispatchers.IO) {
+        // 个人页在刚登录时偶尔要第二次才带全信息，重试一次
+        var profile = UserProfile()
+        repeat(2) { attempt ->
+            val html = runCatching { client.get(ApiUris.space(0, doWhat = "profile")) }.getOrDefault("")
+            if (html.isNotBlank()) {
+                profile = SocialParser.enrichProfile(UserPagesParser.parseProfile(html), html)
+                if (profile.uid > 0 && profile.username.isNotBlank()) return@withContext profile
+            }
+            if (attempt == 0) delay(900)
+        }
+        profile
     }
 
     suspend fun myProfile(): UserProfile = withContext(Dispatchers.IO) {
